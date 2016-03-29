@@ -14,8 +14,9 @@ from rsn_status_monitor import RSNStatusMonitor
 test_dir = os.path.dirname(__file__)
 streamed = pd.read_csv(os.path.join(test_dir, 'data', 'ooi-status.csv'))
 
-def mock_query_cassandra(self, deployed_stream):
-    out = [x[1:8] for x in streamed.itertuples()]
+
+def mock_query_cassandra(self):
+    out = [x[2:9] for x in streamed.itertuples()]
     streamed['count'] += 10
     streamed['last'] += 10
     return out
@@ -30,14 +31,12 @@ class CassandraTest(unittest.TestCase):
         engine = create_engine('postgresql+psycopg2://monitor@localhost/monitor')
         Base.metadata.drop_all(bind=engine)
         createDB(engine)
-        cls.Session = sessionmaker(bind=engine, autocommit=True)
-        session = cls.Session()
+        monitor = RSNStatusMonitor('0', '0')
+        monitor.create_counts(mock_query_cassandra(None))
+        return monitor
 
-        with session.begin():
-            se = ExpectedStream(name=cls.stream, fail_interval=10, warn_interval=60, method=cls.method)
-            rf = ReferenceDesignator(name=cls.refdes)
-            dp = DeployedStream(expected_stream=se, ref_des=rf)
-            session.add(dp)
+    def test_create_monitor(self):
+        pass
 
     def test_query_cassandra(self):
         session = self.Session()
@@ -61,7 +60,7 @@ class CassandraTest(unittest.TestCase):
         session = self.Session()
         with session.begin():
             ds = session.query(DeployedStream).get(1)  # TODO - get based on stream name
-            monitor = RSNStatusMonitor()
+            monitor = RSNStatusMonitor('0', '0')
             # now check to see if the create window is working properly. Setup a base, then check after the warn and
             # fail intervals
             base_window = monitor.create_window(ds)

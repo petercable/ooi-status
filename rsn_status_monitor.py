@@ -3,6 +3,7 @@ RSN health and status monitor for data particles received by OOI CI.
 
 @author Dan Mergens
 """
+import datetime
 import requests
 import click
 from apscheduler.schedulers.blocking import BlockingScheduler
@@ -11,8 +12,11 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, scoped_session
 
 import logging
+
+from sqlalchemy.sql.elements import and_
+
 from get_logger import get_logger
-from model.rsn_status_model import Counts, createDB, DeployedStream
+from model.rsn_status_model import Counts, createDB, DeployedStream, ReferenceDesignator, ExpectedStream
 from stop_watch import StopWatch
 
 log = get_logger(__name__, logging.DEBUG)
@@ -27,6 +31,8 @@ def parse_reference_designator(ref_des):
 
 
 class RSNStatusMonitor(object):
+    ntp_epoch_offset = (datetime.datetime(1970, 1, 1) - datetime.datetime(1900, 1, 1)).total_seconds()
+
     def __init__(self, posthost, hostname):
         self.hostname = hostname
         engine = create_engine('postgresql+psycopg2://monitor@{posthost}'.format(posthost=posthost))
@@ -52,7 +58,7 @@ class RSNStatusMonitor(object):
             return counts[0].rate(counts[1])
 
     def create_window(self, deployed_stream):
-        count, timestamp = self._query_cassandra(deployed_stream)
+        count, timestamp = self._query_api(deployed_stream)
         previous_count = self.session.query(Counts).filter(Counts.stream==deployed_stream).\
             orderby(Counts.timestamp.desc()).first()
 
@@ -71,11 +77,28 @@ class RSNStatusMonitor(object):
                     log.info('stream is: %s', stream)
                     self.create_window(stream)
 
-    def create_counts(self, rows):
-        for subsite, node, sensor, stream, method, count, timestamp in rows():
-            refdes = '-'.join((subsite, node, sensor))
+    def get_or_create_stream(self, refdes, stream, method):
+        _refdes = self.session.query(ReferenceDesignator).filter(ReferenceDesignator.name==refdes).first()
+        if _refdes is None:
+            _refdes = ReferenceDesignator(name=refdes)
+            self.session.add(_refdes)
+        expected = self.session.query(ExpectedStream).filter(and_(ExpectedStream.name == stream, ExpectedStream.method == method)).first()
+        if expected is None:
+            expected = ExpectedStream(name=stream, method=method)
+            self.session.add(expected)
+        deployed = self.session.query(DeployedStream).filter(and_(DeployedStream.ref_des == _refdes, DeployedStream.expected_stream == expected)).first()
+        if deployed is None:
+            deployed = DeployedStream(ref_des=_refdes, expected_stream=expected)
+            self.session.add(deployed)
+        return deployed
 
-            session.query(ReferenceDesignator).filter(ReferenceDesignator.name==refdes).first()
+    def create_counts(self, rows):
+        for subsite, node, sensor, stream, method, count, ntp_timestamp in rows:
+            timestamp = datetime.datetime.utcfromtimestamp(ntp_timestamp - self.ntp_epoch_offset)
+            refdes = '-'.join((subsite, node, sensor))
+            deployed = self.get_or_create_stream(refdes, stream, method)
+            count = Counts(stream=deployed, particle_count=count, timestamp=timestamp)
+            self.session.add(count)
 
     def _query_cassandra(self):
         return cassandra.execute('select subsite, node, sensor, stream, method, count, last from stream_metadata')
