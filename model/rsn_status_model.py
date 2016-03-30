@@ -58,6 +58,7 @@ class Counts(Base):
         return '{0} {1} particles at {2}'.format(self.stream, self.particle_count, self.timestamp)
 
 
-def createDB(engine):
+def create_database(engine, drop=False):
+    if drop:
+        Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
-
