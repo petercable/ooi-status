@@ -72,6 +72,10 @@ class BaseStatusMonitor(object):
             self.session.add(deployed)
         return deployed
 
+    def _get_last_count(self, deployed_stream):
+        return self.session.query(Counts).filter(
+            Counts.stream == deployed_stream).order_by(Counts.timestamp.desc()).first()
+
 
 class CassStatusMonitor(BaseStatusMonitor):
 
@@ -82,16 +86,17 @@ class CassStatusMonitor(BaseStatusMonitor):
     def gather_all(self):
         self._counts_from_rows(self._query_cassandra())
 
-    @stopwatch('create_counts:')
+    @stopwatch()
     def _counts_from_rows(self, rows):
-        log.error('enter counts from rows')
         with self.session.begin():
-            for subsite, node, sensor, stream, method, count, ntp_timestamp in rows:
+            for index, (subsite, node, sensor, stream, method, count, ntp_timestamp) in enumerate(rows):
                 timestamp = datetime.datetime.utcfromtimestamp(ntp_timestamp - self.ntp_epoch_offset)
                 refdes = '-'.join((subsite, node, sensor))
                 deployed = self._get_or_create_stream(refdes, stream, method)
-                count = Counts(stream=deployed, particle_count=count, timestamp=timestamp)
-                self.session.add(count)
+                last_count = self._get_last_count(deployed)
+                if not last_count or (last_count and last_count.particle_count != count):
+                    count = Counts(stream=deployed, particle_count=count, timestamp=timestamp)
+                    self.session.add(count)
 
     def _query_cassandra(self):
         return self.cassandra.execute('select subsite, node, sensor, stream, method, count, last from stream_metadata')

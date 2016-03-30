@@ -19,9 +19,10 @@ streamed = pd.read_csv(os.path.join(test_dir, 'data', 'ooi-status.csv'))
 
 def mock_query_cassandra(_):
     out = [x[2:8] + x[9:10] for x in streamed.itertuples()]
-    streamed['count'] += 10
-    streamed['last'] += 10
-    return out[:10]
+    mask = streamed['method'] == 'streamed'
+    streamed['count'].values[mask.values] += 10
+    streamed['last'].values[mask.values] += 10
+    return out
 
 
 class StatusMonitorTest(unittest.TestCase):
@@ -39,7 +40,7 @@ class CassStatusMonitorTest(StatusMonitorTest):
         self.monitor._counts_from_rows(mock_query_cassandra(None))
 
     def test_create_many_counts(self):
-        with stopwatch('10 rounds:'):
+        with stopwatch('10 rounds'):
             for _ in xrange(10):
                 self.monitor._counts_from_rows(mock_query_cassandra(None))
 

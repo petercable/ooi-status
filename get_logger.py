@@ -26,7 +26,7 @@ def setup(level=logging.WARN):
 def get_logger(name, level=logging.WARN):
     global root_logger
     if root_logger is None:
-        setup(level)
+        root_logger = setup(level)
 
     logger = logging.getLogger(name)
     logger.setLevel(level)
