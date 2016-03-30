@@ -8,6 +8,7 @@ import requests
 import click
 import logging
 import cachetools
+import pandas as pd
 
 from apscheduler.schedulers.blocking import BlockingScheduler
 from sqlalchemy import create_engine
@@ -41,17 +42,23 @@ class BaseStatusMonitor(object):
         rate = self.last_rate(deployed_stream)
         warn_interval = deployed_stream.expected_stream.warn_interval
         fail_interval = deployed_stream.expected_stream.fail_interval
+        expected_rate = deployed_stream.expected_stream.fail_interval
 
         if warn_interval and rate < warn_interval:
             state = 'OPERATIONAL'
+            if expected_rate and rate < expected_rate:
+                state = 'PARTIAL'
         elif fail_interval and rate < fail_interval:
             state = 'PARTIAL'
+
         return state
 
     def last_rate(self, deployed_stream):
         with self.session.begin():
             counts = self.session.query(Counts).filter(
                 Counts.stream == deployed_stream).order_by(Counts.timestamp.desc())[:2]
+            if len(counts) < 2:
+                return 0
             return counts[0].rate(counts[1])
 
     @cachetools.cached(cache)
@@ -76,6 +83,15 @@ class BaseStatusMonitor(object):
         return self.session.query(Counts).filter(
             Counts.stream == deployed_stream).order_by(Counts.timestamp.desc()).first()
 
+    def read_expected_csv(self, filename):
+        """ Populate expected stream definitions from definition in CSV-formatted file"""
+        df = pd.read_csv(filename)
+        fields = ['stream', 'method', 'expected rate (Hz)', 'timeout']
+        with self.session.begin():
+            for stream, method, rate, timeout in df[fields].itertuples(index=False):
+                es = ExpectedStream(name=stream, method=method, rate=rate, warn_interval=timeout, fail_interval=timeout)
+                self.session.add(es)
+
 
 class CassStatusMonitor(BaseStatusMonitor):
 
@@ -89,7 +105,7 @@ class CassStatusMonitor(BaseStatusMonitor):
     @stopwatch()
     def _counts_from_rows(self, rows):
         with self.session.begin():
-            for index, (subsite, node, sensor, stream, method, count, ntp_timestamp) in enumerate(rows):
+            for index, (subsite, node, sensor, method, stream, count, ntp_timestamp) in enumerate(rows):
                 timestamp = datetime.datetime.utcfromtimestamp(ntp_timestamp - self.ntp_epoch_offset)
                 refdes = '-'.join((subsite, node, sensor))
                 deployed = self._get_or_create_stream(refdes, stream, method)
@@ -156,7 +172,6 @@ class UframeStatusMonitor(BaseStatusMonitor):
     def parse_reference_designator(ref_des):
         subsite, node, sensor = ref_des.split('-', 2)
         return subsite, node, sensor
-
 
 @click.command()
 @click.option('--posthost', default='localhost', help='hostname for Postgres database')

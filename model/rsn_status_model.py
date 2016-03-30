@@ -24,6 +24,7 @@ class ExpectedStream(Base):
     id = Column(Integer, primary_key=True)
     name = Column(String, nullable=False)
     method = Column(String, nullable=False)
+    rate = Column(String, default=0)  # 0 means untracked
     warn_interval = Column(Integer, default=0)  # 0 means untracked
     fail_interval = Column(Integer, default=0)  # 0 means untracked
 
