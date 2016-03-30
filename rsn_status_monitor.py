@@ -22,7 +22,7 @@ from stop_watch import stopwatch
 
 log = get_logger(__name__, logging.DEBUG)
 
-cache = cachetools.LRUCache(100)
+cache = cachetools.LRUCache(3000)
 
 
 class BaseStatusMonitor(object):
@@ -84,6 +84,7 @@ class CassStatusMonitor(BaseStatusMonitor):
 
     @stopwatch('create_counts:')
     def _counts_from_rows(self, rows):
+        log.error('enter counts from rows')
         with self.session.begin():
             for subsite, node, sensor, stream, method, count, ntp_timestamp in rows:
                 timestamp = datetime.datetime.utcfromtimestamp(ntp_timestamp - self.ntp_epoch_offset)

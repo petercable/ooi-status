@@ -1,22 +1,27 @@
+import logging
 import os
 import unittest
 
 import pandas as pd
 from sqlalchemy import create_engine
 
+from get_logger import get_logger
 from model.rsn_status_model import create_database
 from rsn_status_monitor import CassStatusMonitor, UframeStatusMonitor
 from stop_watch import stopwatch
+
+
+log = get_logger(__name__, level=logging.DEBUG)
 
 test_dir = os.path.dirname(__file__)
 streamed = pd.read_csv(os.path.join(test_dir, 'data', 'ooi-status.csv'))
 
 
 def mock_query_cassandra(_):
-    out = [x[2:9] for x in streamed.itertuples()]
+    out = [x[2:8] + x[9:10] for x in streamed.itertuples()]
     streamed['count'] += 10
     streamed['last'] += 10
-    return out
+    return out[:10]
 
 
 class StatusMonitorTest(unittest.TestCase):
@@ -30,9 +35,12 @@ class CassStatusMonitorTest(StatusMonitorTest):
     def setUp(self):
         self.monitor = CassStatusMonitor(self.engine, None)
 
+    def test_create_once(self):
+        self.monitor._counts_from_rows(mock_query_cassandra(None))
+
     def test_create_many_counts(self):
-        with stopwatch('100 rounds:'):
-            for _ in xrange(100):
+        with stopwatch('10 rounds:'):
+            for _ in xrange(10):
                 self.monitor._counts_from_rows(mock_query_cassandra(None))
 
 

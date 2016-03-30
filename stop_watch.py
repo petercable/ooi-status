@@ -25,7 +25,7 @@ class stopwatch(object):
 
     # noinspection PyUnusedLocal
     def __exit__(self, exc_type, exc_val, exc_tb):
-        log.debug(self)
+        log.error(self)
 
     def __call__(self, f):
         @functools.wraps(f)
