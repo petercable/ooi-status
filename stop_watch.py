@@ -1,10 +1,11 @@
 import datetime
-import logging
+import functools
+from get_logger import get_logger
 
-log = logging.getLogger(__name__)
+log = get_logger(__name__)
 
 
-class StopWatch(object):
+class stopwatch(object):
     """
     Easily measure elapsed time
     """
@@ -22,5 +23,16 @@ class StopWatch(object):
     def __enter__(self):
         pass
 
+    # noinspection PyUnusedLocal
     def __exit__(self, exc_type, exc_val, exc_tb):
         log.debug(self)
+
+    def __call__(self, f):
+        @functools.wraps(f)
+        def decorated(*args, **kwargs):
+            self.start_time = datetime.datetime.now()
+            if self.message is None:
+                self.message = 'function %r finished in :'
+            with self:
+                return f(*args, **kwargs)
+        return decorated
