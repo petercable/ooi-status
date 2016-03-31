@@ -214,7 +214,9 @@ class UframeStatusMonitor(BaseStatusMonitor):
 @click.command()
 @click.option('--posthost', default='localhost', help='hostname for Postgres database')
 @click.option('--casshost', default='localhost', help='hostname for the cassandra database')
-def main(casshost, posthost):
+@click.option('--expected', type=click.Path(exists=True, dir_okay=False),
+              help='CSV file with expected rates and timeouts')
+def main(casshost, posthost, expected):
     engine = create_engine('postgresql+psycopg2://monitor@{posthost}'.format(posthost=posthost))
     create_database(engine)
 
@@ -225,10 +227,11 @@ def main(casshost, posthost):
         cassandra = None
 
     monitor = CassStatusMonitor(engine, cassandra)
+    monitor.read_expected_csv(expected)
     scheduler = BlockingScheduler()
     log.info('adding job')
-    # scheduler.add_job(monitor.gather_all, 'cron', second=0)
-    scheduler.add_job(monitor.gather_all, 'interval', seconds=5)
+    scheduler.add_job(monitor.gather_all, 'cron', second=0)
+    # scheduler.add_job(monitor.gather_all, 'interval', seconds=60)
     log.info('starting job')
     scheduler.start()
 
