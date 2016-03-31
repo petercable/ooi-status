@@ -7,7 +7,6 @@ import datetime
 import requests
 import click
 import logging
-import cachetools
 import pandas as pd
 
 from apscheduler.schedulers.blocking import BlockingScheduler
@@ -16,14 +15,11 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.sql.elements import and_
 from cassandra.cluster import Cluster
 
-
 from get_logger import get_logger
 from model.rsn_status_model import Counts, create_database, DeployedStream, ReferenceDesignator, ExpectedStream
 from stop_watch import stopwatch
 
 log = get_logger(__name__, logging.DEBUG)
-
-cache = cachetools.LRUCache(3000)
 
 
 class BaseStatusMonitor(object):
@@ -33,6 +29,10 @@ class BaseStatusMonitor(object):
         self.engine = engine
         session_factory = sessionmaker(bind=engine, autocommit=True)
         self.session = session_factory()
+        self._last_count = {}
+        self._refdes_cache = {}
+        self._expected_cache = {}
+        self._deployed_cache = {}
 
     def gather_all(self):
         raise NotImplemented
@@ -61,27 +61,51 @@ class BaseStatusMonitor(object):
                 return 0
             return counts[0].rate(counts[1])
 
-    @cachetools.cached(cache)
-    def _get_or_create_stream(self, refdes, stream, method):
-        _refdes = self.session.query(ReferenceDesignator).filter(ReferenceDesignator.name == refdes).first()
-        if _refdes is None:
-            _refdes = ReferenceDesignator(name=refdes)
-            self.session.add(_refdes)
-        expected = self.session.query(ExpectedStream).filter(
-            and_(ExpectedStream.name == stream, ExpectedStream.method == method)).first()
-        if expected is None:
-            expected = ExpectedStream(name=stream, method=method)
-            self.session.add(expected)
-        deployed = self.session.query(DeployedStream).filter(
-            and_(DeployedStream.ref_des == _refdes, DeployedStream.expected_stream == expected)).first()
-        if deployed is None:
-            deployed = DeployedStream(ref_des=_refdes, expected_stream=expected)
-            self.session.add(deployed)
-        return deployed
+    def _get_or_create_refdes(self, name):
+        if name not in self._refdes_cache:
+            refdes = self.session.query(ReferenceDesignator).filter(ReferenceDesignator.name == name).first()
+            if refdes is None:
+                refdes = ReferenceDesignator(name=name)
+                self.session.add(refdes)
+                self.session.flush()
+            self._refdes_cache[name] = refdes.id
+        return self._refdes_cache[name]
 
-    def _get_last_count(self, deployed_stream):
-        return self.session.query(Counts).filter(
-            Counts.stream == deployed_stream).order_by(Counts.timestamp.desc()).first()
+    def _get_or_create_expected(self, stream, method):
+        if (stream, method) not in self._expected_cache:
+            expected = self.session.query(ExpectedStream).filter(
+                and_(ExpectedStream.name == stream, ExpectedStream.method == method)).first()
+            if expected is None:
+                expected = ExpectedStream(name=stream, method=method)
+                self.session.add(expected)
+                self.session.flush()
+            self._expected_cache[(stream, method)] = expected.id
+        return self._expected_cache[(stream, method)]
+
+    def _get_or_create_stream(self, refdes, stream, method):
+        refdes_id = self._get_or_create_refdes(refdes)
+        expected_id = self._get_or_create_expected(stream, method)
+        if (refdes_id, expected_id) not in self._deployed_cache:
+            deployed = self.session.query(DeployedStream).filter(
+                and_(DeployedStream.ref_des_id == refdes_id, DeployedStream.expected_stream_id == expected_id)).first()
+            if deployed is None:
+                deployed = DeployedStream(ref_des_id=refdes_id, expected_stream_id=expected_id)
+                self.session.add(deployed)
+                self.session.flush()
+            self._deployed_cache[(refdes_id, expected_id)] = deployed.id
+        return self._deployed_cache[(refdes_id, expected_id)]
+
+    def _get_last_count(self, refdes, stream, method):
+        key = (refdes, stream, method)
+        deployed_stream_id = None
+        if key not in self._last_count:
+            deployed_stream_id = self._get_or_create_stream(refdes, stream, method)
+            last = self.session.query(Counts) \
+                .filter(Counts.stream_id == deployed_stream_id) \
+                .order_by(Counts.timestamp.desc()).first()
+            if last:
+                self._last_count[key] = last
+        return self._last_count.get(key), deployed_stream_id
 
     def read_expected_csv(self, filename):
         """ Populate expected stream definitions from definition in CSV-formatted file"""
@@ -94,7 +118,6 @@ class BaseStatusMonitor(object):
 
 
 class CassStatusMonitor(BaseStatusMonitor):
-
     def __init__(self, engine, cassandra_session):
         super(CassStatusMonitor, self).__init__(engine)
         self.cassandra = cassandra_session
@@ -105,14 +128,20 @@ class CassStatusMonitor(BaseStatusMonitor):
     @stopwatch()
     def _counts_from_rows(self, rows):
         with self.session.begin():
+            added = 0
             for index, (subsite, node, sensor, method, stream, count, ntp_timestamp) in enumerate(rows):
                 timestamp = datetime.datetime.utcfromtimestamp(ntp_timestamp - self.ntp_epoch_offset)
                 refdes = '-'.join((subsite, node, sensor))
-                deployed = self._get_or_create_stream(refdes, stream, method)
-                last_count = self._get_last_count(deployed)
+                last_count, deployed_id = self._get_last_count(refdes, stream, method)
+
                 if not last_count or (last_count and last_count.particle_count != count):
-                    count = Counts(stream=deployed, particle_count=count, timestamp=timestamp)
+                    added += 1
+                    if deployed_id is None:
+                        deployed_id = self._get_or_create_stream(refdes, stream, method)
+                    count = Counts(stream_id=deployed_id, particle_count=count, timestamp=timestamp)
                     self.session.add(count)
+                    self._last_count[deployed_id] = count
+            log.debug('ADDED: %d', added)
 
     def _query_cassandra(self):
         return self.cassandra.execute('select subsite, node, sensor, stream, method, count, last from stream_metadata')
