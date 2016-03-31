@@ -3,7 +3,7 @@ Track the CI particles being ingested into cassandra and store information into 
 
 @author Dan Mergens
 """
-from sqlalchemy import Column, Integer, String, ForeignKey, DateTime
+from sqlalchemy import Column, Integer, String, Float, ForeignKey, DateTime
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 
@@ -24,12 +24,12 @@ class ExpectedStream(Base):
     id = Column(Integer, primary_key=True)
     name = Column(String, nullable=False)
     method = Column(String, nullable=False)
-    rate = Column(String, default=0)  # 0 means untracked
+    rate = Column(Float, default=0)  # 0 means untracked
     warn_interval = Column(Integer, default=0)  # 0 means untracked
     fail_interval = Column(Integer, default=0)  # 0 means untracked
 
     def __repr__(self):
-        return '{0} {1} {2} {3}'.format(self.name, self.method, self.warn_interval, self.fail_interval)
+        return '{0} {1} {2} Hz {3}/{4}'.format(self.name, self.method, self.rate, self.warn_interval, self.fail_interval)
 
 
 class DeployedStream(Base):
@@ -53,7 +53,7 @@ class Counts(Base):
     timestamp = Column(DateTime, nullable=False)
 
     def rate(self, count):
-        return abs((count.particle_count - self.particle_count) / (count.timestamp - self.timestamp).to_seconds())
+        return abs((count.particle_count - self.particle_count) / (count.timestamp - self.timestamp).seconds)
 
     def __repr__(self):
         return '{0} {1} particles at {2}'.format(self.stream, self.particle_count, self.timestamp)

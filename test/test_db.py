@@ -24,7 +24,7 @@ def mock_query_cassandra(_):
     mask = streamed['method'] == 'streamed'
     streamed['count'].values[mask.values] += 10
     streamed['last'].values[mask.values] += 10
-    return out
+    return out[:1000]
 
 
 class StatusMonitorTest(unittest.TestCase):
@@ -51,6 +51,8 @@ class CassStatusMonitorTest(StatusMonitorTest):
 
     def resolve_deployed_stream(self, name):
         es = self.monitor.session.query(ExpectedStream).filter(ExpectedStream.name == name).first()
+        if es is None:
+            return None
         return self.monitor.session.query(DeployedStream).filter(DeployedStream.expected_stream == es).first()
 
     def test_read_expected(self):
@@ -64,13 +66,22 @@ class CassStatusMonitorTest(StatusMonitorTest):
 
         # telemetered streams are not getting updated, so they will be partial (if tracked)
         ds = self.resolve_deployed_stream('mopak_o_dcl_accel')
-        self.assertEqual(self.monitor.status(ds), 'PARTIAL')
+        self.assertIsNotNone(ds)
+        self.assertEqual('PARTIAL', self.monitor.status(ds))
 
         ds = self.resolve_deployed_stream('cg_dcl_eng_dcl_gps_recovered')
-        self.assertEqual(self.monitor.status(ds), 'OPERATIONAL')
+        self.assertIsNotNone(ds)
+        self.assertEqual('OPERATIONAL', self.monitor.status(ds))
 
+        # CTDBP rate is 1.8 Hz so it should be partial for our test (which updates at 1 Hz)
         ds = self.resolve_deployed_stream('ctdbp_no_sample')
-        self.assertEqual(self.monitor.status(ds), 'OPERATIONAL')
+        self.assertIsNotNone(ds)
+        self.assertEqual('PARTIAL', self.monitor.status(ds))
+
+        # ADCP rate is 0.96 Hz so it should be operational for our test (which updates at 1 Hz)
+        ds = self.resolve_deployed_stream('adcp_velocity_beam')
+        self.assertIsNotNone(ds)
+        self.assertEqual('OPERATIONAL', self.monitor.status(ds))
 
 
 class UframeStatusMonitorTest(StatusMonitorTest):

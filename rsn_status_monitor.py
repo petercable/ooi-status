@@ -42,9 +42,10 @@ class BaseStatusMonitor(object):
         rate = self.last_rate(deployed_stream)
         warn_interval = deployed_stream.expected_stream.warn_interval
         fail_interval = deployed_stream.expected_stream.fail_interval
-        expected_rate = deployed_stream.expected_stream.fail_interval
+        expected_rate = deployed_stream.expected_stream.rate
 
-        if warn_interval and rate < warn_interval:
+        log.debug('rate (cur/exp): %s/%s ', rate, expected_rate)
+        if not fail_interval or warn_interval and rate < warn_interval:
             state = 'OPERATIONAL'
             if expected_rate and rate < expected_rate:
                 state = 'PARTIAL'
@@ -57,6 +58,7 @@ class BaseStatusMonitor(object):
         with self.session.begin():
             counts = self.session.query(Counts).filter(
                 Counts.stream == deployed_stream).order_by(Counts.timestamp.desc())[:2]
+            log.debug('counts: %s', counts)
             if len(counts) < 2:
                 return 0
             return counts[0].rate(counts[1])
