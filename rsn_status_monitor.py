@@ -152,7 +152,7 @@ class CassStatusMonitor(BaseStatusMonitor):
             log.debug('ADDED: %d', added)
 
     def _query_cassandra(self):
-        return self.cassandra.execute('select subsite, node, sensor, stream, method, count, last from stream_metadata')
+        return self.cassandra.execute('select subsite, node, sensor, method, stream, count, last from stream_metadata')
 
 
 class UframeStatusMonitor(BaseStatusMonitor):
@@ -217,7 +217,7 @@ class UframeStatusMonitor(BaseStatusMonitor):
 @click.option('--expected', type=click.Path(exists=True, dir_okay=False),
               help='CSV file with expected rates and timeouts')
 def main(casshost, posthost, expected):
-    engine = create_engine('postgresql+psycopg2://monitor@{posthost}'.format(posthost=posthost))
+    engine = create_engine('postgresql+psycopg2://monitor:monitor@{posthost}'.format(posthost=posthost))
     create_database(engine)
 
     if casshost is not None:
