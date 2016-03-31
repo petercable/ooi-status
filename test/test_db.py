@@ -38,11 +38,9 @@ class CassStatusMonitorTest(StatusMonitorTest):
     def setUp(self):
         self.monitor = CassStatusMonitor(self.engine, None)
 
-    @unittest.skip('fuck off')
     def test_create_once(self):
         self.monitor._counts_from_rows(mock_query_cassandra(None))
 
-    @unittest.skip('fuck off')
     def test_create_many_counts(self):
         self.monitor._counts_from_rows(mock_query_cassandra(None))
         with stopwatch('10 rounds'):
@@ -56,9 +54,10 @@ class CassStatusMonitorTest(StatusMonitorTest):
         return self.monitor.session.query(DeployedStream).filter(DeployedStream.expected_stream == es).first()
 
     def test_read_expected(self):
-        self.monitor.read_expected_csv(os.path.join(test_dir,'data', 'expected-rates.csv'))
+        """ test read from file - depends on test_create_many_counts running first """
+        self.monitor.read_expected_csv(os.path.join(test_dir, 'data', 'expected-rates.csv'))
         with self.monitor.session.begin():
-            self.assertEqual(self.monitor.session.query(ExpectedStream).count(), 365)
+            self.assertEqual(self.monitor.session.query(ExpectedStream).count(), 380)
 
         # populate two data points
         self.monitor._counts_from_rows(mock_query_cassandra(None))

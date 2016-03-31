@@ -70,7 +70,7 @@ class BaseStatusMonitor(object):
                 refdes = ReferenceDesignator(name=name)
                 self.session.add(refdes)
                 self.session.flush()
-            self._refdes_cache[name] = refdes.id
+            self._refdes_cache[name] = refdes
         return self._refdes_cache[name]
 
     def _get_or_create_expected(self, stream, method):
@@ -81,33 +81,33 @@ class BaseStatusMonitor(object):
                 expected = ExpectedStream(name=stream, method=method)
                 self.session.add(expected)
                 self.session.flush()
-            self._expected_cache[(stream, method)] = expected.id
+            self._expected_cache[(stream, method)] = expected
         return self._expected_cache[(stream, method)]
 
     def _get_or_create_stream(self, refdes, stream, method):
-        refdes_id = self._get_or_create_refdes(refdes)
-        expected_id = self._get_or_create_expected(stream, method)
-        if (refdes_id, expected_id) not in self._deployed_cache:
+        refdes_obj = self._get_or_create_refdes(refdes)
+        expected_obj = self._get_or_create_expected(stream, method)
+        if (refdes_obj, expected_obj) not in self._deployed_cache:
             deployed = self.session.query(DeployedStream).filter(
-                and_(DeployedStream.ref_des_id == refdes_id, DeployedStream.expected_stream_id == expected_id)).first()
+                and_(DeployedStream.ref_des == refdes_obj, DeployedStream.expected_stream == expected_obj)).first()
             if deployed is None:
-                deployed = DeployedStream(ref_des_id=refdes_id, expected_stream_id=expected_id)
+                deployed = DeployedStream(ref_des=refdes_obj, expected_stream=expected_obj)
                 self.session.add(deployed)
                 self.session.flush()
-            self._deployed_cache[(refdes_id, expected_id)] = deployed.id
-        return self._deployed_cache[(refdes_id, expected_id)]
+            self._deployed_cache[(refdes_obj, expected_obj)] = deployed
+        return self._deployed_cache[(refdes_obj, expected_obj)]
 
     def _get_last_count(self, refdes, stream, method):
         key = (refdes, stream, method)
-        deployed_stream_id = None
+        deployed_stream = None
         if key not in self._last_count:
-            deployed_stream_id = self._get_or_create_stream(refdes, stream, method)
+            deployed_stream = self._get_or_create_stream(refdes, stream, method)
             last = self.session.query(Counts) \
-                .filter(Counts.stream_id == deployed_stream_id) \
+                .filter(Counts.stream == deployed_stream) \
                 .order_by(Counts.timestamp.desc()).first()
             if last:
                 self._last_count[key] = last
-        return self._last_count.get(key), deployed_stream_id
+        return self._last_count.get(key), deployed_stream
 
     def read_expected_csv(self, filename):
         """ Populate expected stream definitions from definition in CSV-formatted file"""
@@ -115,7 +115,13 @@ class BaseStatusMonitor(object):
         fields = ['stream', 'method', 'expected rate (Hz)', 'timeout']
         with self.session.begin():
             for stream, method, rate, timeout in df[fields].itertuples(index=False):
-                es = ExpectedStream(name=stream, method=method, rate=rate, warn_interval=timeout, fail_interval=timeout)
+                es = self.session.query(ExpectedStream).filter(and_(ExpectedStream.name == stream,
+                                                                    ExpectedStream.method == method)).first()
+                if es is None:
+                    es = ExpectedStream(name=stream, method=method)
+                es.rate = rate
+                es.warn_interval = timeout/2
+                es.fail_interval = timeout
                 self.session.add(es)
 
 
@@ -134,15 +140,15 @@ class CassStatusMonitor(BaseStatusMonitor):
             for index, (subsite, node, sensor, method, stream, count, ntp_timestamp) in enumerate(rows):
                 timestamp = datetime.datetime.utcfromtimestamp(ntp_timestamp - self.ntp_epoch_offset)
                 refdes = '-'.join((subsite, node, sensor))
-                last_count, deployed_id = self._get_last_count(refdes, stream, method)
+                last_count, deployed = self._get_last_count(refdes, stream, method)
 
                 if not last_count or (last_count and last_count.particle_count != count):
                     added += 1
-                    if deployed_id is None:
-                        deployed_id = self._get_or_create_stream(refdes, stream, method)
-                    count = Counts(stream_id=deployed_id, particle_count=count, timestamp=timestamp)
+                    if deployed is None:
+                        deployed = self._get_or_create_stream(refdes, stream, method)
+                    count = Counts(stream=deployed, particle_count=count, timestamp=timestamp)
                     self.session.add(count)
-                    self._last_count[deployed_id] = count
+                    self._last_count[deployed] = count
             log.debug('ADDED: %d', added)
 
     def _query_cassandra(self):
@@ -203,6 +209,7 @@ class UframeStatusMonitor(BaseStatusMonitor):
     def parse_reference_designator(ref_des):
         subsite, node, sensor = ref_des.split('-', 2)
         return subsite, node, sensor
+
 
 @click.command()
 @click.option('--posthost', default='localhost', help='hostname for Postgres database')
