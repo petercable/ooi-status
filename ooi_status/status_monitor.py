@@ -8,23 +8,23 @@ import logging
 
 import pandas as pd
 import requests
+from dateutil.parser import parse
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.sql.elements import and_
 
 from get_logger import get_logger
-from ooi_status.model.status_model import Counts, DeployedStream, ReferenceDesignator, ExpectedStream
+from ooi_status.model.status_model import DeployedStream, ExpectedStream, StreamCount
+from ooi_status.queries import resample
 from stop_watch import stopwatch
 
-log = get_logger(__name__, logging.DEBUG)
+log = get_logger(__name__, logging.INFO)
 
 
 class BaseStatusMonitor(object):
-    ntp_epoch_offset = (datetime.datetime(1970, 1, 1) - datetime.datetime(1900, 1, 1)).total_seconds()
-
     def __init__(self, engine):
         self.engine = engine
-        session_factory = sessionmaker(bind=engine, autocommit=True)
-        self.session = session_factory()
+        self.session_factory = sessionmaker(bind=engine, autocommit=True)
+        self.session = self.session_factory()
         self._last_count = {}
         self._refdes_cache = {}
         self._expected_cache = {}
@@ -32,42 +32,6 @@ class BaseStatusMonitor(object):
 
     def gather_all(self):
         raise NotImplemented
-
-    def status(self, deployed_stream):
-        state = 'FAILURE'
-        rate = self.last_rate(deployed_stream)
-        warn_interval = deployed_stream.expected_stream.warn_interval
-        fail_interval = deployed_stream.expected_stream.fail_interval
-        expected_rate = deployed_stream.expected_stream.rate
-
-        log.debug('rate (cur/exp): %s/%s ', rate, expected_rate)
-        if not fail_interval or warn_interval and rate < warn_interval:
-            state = 'OPERATIONAL'
-            if expected_rate and rate < expected_rate:
-                state = 'PARTIAL'
-        elif fail_interval and rate < fail_interval:
-            state = 'PARTIAL'
-
-        return state
-
-    def last_rate(self, deployed_stream):
-        with self.session.begin():
-            counts = self.session.query(Counts).filter(
-                Counts.stream == deployed_stream).order_by(Counts.timestamp.desc())[:2]
-            log.debug('counts: %s', counts)
-            if len(counts) < 2:
-                return 0
-            return counts[0].rate(counts[1])
-
-    def _get_or_create_refdes(self, name):
-        if name not in self._refdes_cache:
-            refdes = self.session.query(ReferenceDesignator).filter(ReferenceDesignator.name == name).first()
-            if refdes is None:
-                refdes = ReferenceDesignator(name=name)
-                self.session.add(refdes)
-                self.session.flush()
-            self._refdes_cache[name] = refdes
-        return self._refdes_cache[name]
 
     def _get_or_create_expected(self, stream, method):
         if (stream, method) not in self._expected_cache:
@@ -80,31 +44,21 @@ class BaseStatusMonitor(object):
             self._expected_cache[(stream, method)] = expected
         return self._expected_cache[(stream, method)]
 
-    def _get_or_create_stream(self, refdes, stream, method):
-        refdes_obj = self._get_or_create_refdes(refdes)
+    def _get_or_create_stream(self, refdes, stream, method, count, timestamp, coll_time):
         expected_obj = self._get_or_create_expected(stream, method)
-        if (refdes_obj, expected_obj) not in self._deployed_cache:
+        if (refdes, expected_obj) not in self._deployed_cache:
             deployed = self.session.query(DeployedStream).filter(
-                and_(DeployedStream.ref_des == refdes_obj, DeployedStream.expected_stream == expected_obj)).first()
+                and_(DeployedStream.reference_designator == refdes,
+                     DeployedStream.expected_stream == expected_obj)).first()
             if deployed is None:
-                deployed = DeployedStream(ref_des=refdes_obj, expected_stream=expected_obj)
+                deployed = DeployedStream(reference_designator=refdes, expected_stream=expected_obj,
+                                          particle_count=count, last_seen=timestamp, collected=coll_time)
                 self.session.add(deployed)
                 self.session.flush()
-            self._deployed_cache[(refdes_obj, expected_obj)] = deployed
-        return self._deployed_cache[(refdes_obj, expected_obj)]
+            self._deployed_cache[(refdes, expected_obj)] = deployed
+        return self._deployed_cache[(refdes, expected_obj)]
 
-    def _get_last_count(self, refdes, stream, method):
-        key = (refdes, stream, method)
-        deployed_stream = None
-        if key not in self._last_count:
-            deployed_stream = self._get_or_create_stream(refdes, stream, method)
-            last = self.session.query(Counts) \
-                .filter(Counts.stream == deployed_stream) \
-                .order_by(Counts.timestamp.desc()).first()
-            if last:
-                self._last_count[key] = last
-        return self._last_count.get(key), deployed_stream
-
+    @stopwatch()
     def read_expected_csv(self, filename):
         """ Populate expected stream definitions from definition in CSV-formatted file"""
         df = pd.read_csv(filename)
@@ -115,93 +69,98 @@ class BaseStatusMonitor(object):
                                                                     ExpectedStream.method == method)).first()
                 if es is None:
                     es = ExpectedStream(name=stream, method=method)
-                es.rate = rate
+                es.expected_rate = rate
                 es.warn_interval = timeout * 2
                 es.fail_interval = timeout * 10
                 self.session.add(es)
 
+    @stopwatch()
+    def _create_counts(self, rows):
+        now = datetime.datetime.utcnow()
+        with self.session.begin():
+            for row in rows:
+                log.debug('processing %s', row)
+                reference_designator, method, stream, count, last_seen = row
+                if method == 'streamed':
+                    self._create_count(reference_designator, stream, method, count, last_seen, now)
+
+    def _create_count(self, reference_designator, stream, method, particle_count, timestamp, now):
+        deployed = self._get_or_create_stream(reference_designator, stream, method, particle_count, timestamp, now)
+        if deployed.collected != now:
+            count_diff = particle_count - deployed.particle_count
+            time_diff = (now - deployed.collected).total_seconds()
+            deployed.particle_count = particle_count
+            deployed.last_seen = timestamp
+            deployed.collected = now
+            particle_count = StreamCount(stream_id=deployed.id, collected_time=now,
+                                         particle_count=count_diff, seconds=time_diff)
+            self.session.add(particle_count)
+
+    def resample_count_data_hourly(self):
+        # get a datetime object representing this HOUR
+        now = datetime.datetime.utcnow().replace(second=0, minute=0)
+        # get a datetime object representing this HOUR - 24
+        twenty_four_ago = now - datetime.timedelta(hours=24)
+        # get a datetime object representing this HOUR - 48
+        fourty_eight_ago = now - datetime.timedelta(hours=48)
+        session = self.session_factory()
+
+        for deployed_stream in self.session.query(DeployedStream):
+            log.info('Resampling %s', deployed_stream)
+            # resample all count data from now-48 to now-24 to 1 hour
+            with session.begin():
+                resample(session, deployed_stream.id, fourty_eight_ago, twenty_four_ago, 3600)
+
 
 class CassStatusMonitor(BaseStatusMonitor):
+    ntp_epoch_offset = (datetime.datetime(1970, 1, 1) - datetime.datetime(1900, 1, 1)).total_seconds()
+
     def __init__(self, engine, cassandra_session):
         super(CassStatusMonitor, self).__init__(engine)
         self.cassandra = cassandra_session
 
     def gather_all(self):
-        self._counts_from_rows(self._query_cassandra())
-
-    @stopwatch()
-    def _counts_from_rows(self, rows):
-        with self.session.begin():
-            added = 0
-            for index, (subsite, node, sensor, method, stream, count, ntp_timestamp) in enumerate(rows):
-                timestamp = datetime.datetime.utcfromtimestamp(ntp_timestamp - self.ntp_epoch_offset)
-                refdes = '-'.join((subsite, node, sensor))
-                last_count, deployed = self._get_last_count(refdes, stream, method)
-
-                if not last_count or (last_count and last_count.particle_count != count):
-                    added += 1
-                    if deployed is None:
-                        deployed = self._get_or_create_stream(refdes, stream, method)
-                    count = Counts(stream=deployed, particle_count=count, timestamp=timestamp)
-                    self.session.add(count)
-                    self._last_count[deployed] = count
-            log.debug('ADDED: %d', added)
+        self._create_counts(self._query_cassandra())
 
     def _query_cassandra(self):
-        return self.cassandra.execute('select subsite, node, sensor, method, stream, count, last from stream_metadata')
+        stmt = 'select subsite, node, sensor, method, stream, count, last from stream_metadata'
+        for row in self.cassandra.execute(stmt):
+            subsite, node, sensor, method, stream, particle_count, last_seen_ntp = row
+            reference_designator = '-'.join((subsite, node, sensor))
+            last_seen = datetime.datetime.utcfromtimestamp(last_seen_ntp - self.ntp_epoch_offset)
+            yield reference_designator, method, stream, particle_count, last_seen
 
 
 class UframeStatusMonitor(BaseStatusMonitor):
-    EDEX_BASE_URL = 'http://%s:%d/sensor/inv/%s/%s/%s'
+    EDEX_BASE_URL = 'http://%s:%d/sensor/inv/toc'
 
     def __init__(self, engine, uframe_host, uframe_port=12576):
         super(UframeStatusMonitor, self).__init__(engine)
         self.uframe_host = uframe_host
         self.uframe_port = uframe_port
 
-    @stopwatch('gather_all:')
     def gather_all(self):
-        with self.session.begin():
-            for stream in self.session.query(DeployedStream).all():
-                log.info('stream is: %s', stream)
-                self._create_counts(stream)
+        self._create_counts(self._query_api())
 
-    def _create_counts(self, deployed_stream):
-        count, timestamp = self._query_api(deployed_stream)
-        counts = Counts(stream=deployed_stream, particle_count=count, timestamp=timestamp)
-        self.session.add(counts)
-        return counts
-
-    def _query_api(self, deployed_stream):
+    def _query_api(self):
         """
         Get most recent metadata for the stream from cassandra
         :param deployed_stream: deployed stream object from postgres
         :return: (count, timestamp)
         """
-        count = 0  # total number of particles for this stream in cassandra
-        timestamp = 0  # last timestamp for this stream in cassandra
-
-        subsite, node, sensor = self.parse_reference_designator(deployed_stream.ref_des.name)
-        stream = deployed_stream.expected_stream.name
-        method = deployed_stream.expected_stream.method
-
         # get the latest metadata from cassandra
-        url = self.EDEX_BASE_URL % (self.uframe_host, self.uframe_port, subsite, node, sensor) + '/metadata/times'
+        url = self.EDEX_BASE_URL % (self.uframe_host, self.uframe_port)
         response = requests.get(url)
         if response.status_code is not 200:
             log.error('failed to get a valid JSON response')
-            return count, timestamp
 
         # find the matching stream name and method in the return
-        for stream_dict in response.json():
-            if stream_dict['stream'] == stream and stream_dict['method'] == method:
-                count = stream_dict['count']
-                timestamp = stream_dict['endTime']
-                break
-
-        return count, timestamp
-
-    @staticmethod
-    def parse_reference_designator(ref_des):
-        subsite, node, sensor = ref_des.split('-', 2)
-        return subsite, node, sensor
+        for inst_dict in response.json():
+            reference_designator = inst_dict.get('reference_designator')
+            for stream_dict in inst_dict.get('streams'):
+                stream = stream_dict.get('stream')
+                method = stream_dict.get('method')
+                particle_count = stream_dict.get('count')
+                last_seen = parse(stream_dict.get('endTime')).replace(tzinfo=None)
+                if all((stream, method, particle_count, last_seen)):
+                    yield reference_designator, method, stream, particle_count, last_seen

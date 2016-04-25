@@ -2,6 +2,7 @@ import os
 from flask import Flask
 from flask.json import JSONEncoder
 from flask_sqlalchemy import SQLAlchemy
+from flask.ext.compress import Compress
 
 
 class StatusJsonEncoder(JSONEncoder):
@@ -23,6 +24,7 @@ else:
 
 
 app = Flask(__name__)
+Compress(app)
 app.json_encoder = StatusJsonEncoder
 app.config['SQLALCHEMY_ECHO'] = True
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False

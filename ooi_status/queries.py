@@ -1,29 +1,28 @@
 from datetime import timedelta
 
-import numpy as np
 import pandas as pd
 from sqlalchemy import func
 from sqlalchemy.sql.elements import and_
 
-from ooi_status.model.status_model import ReferenceDesignator, ExpectedStream, Counts, DeployedStream
+from ooi_status.model.status_model import ExpectedStream, DeployedStream, StreamCount
 
 RATE_ACCEPTABLE_DEVIATION = 0.2
 
 
 def build_counts_subquery(session, timestamp, stream_id=None):
-    subquery = session.query(Counts.stream_id,
-                             func.max(Counts.particle_count).label('particle_count'),
-                             func.max(Counts.timestamp).label('timestamp'))
-    subquery = subquery.group_by(Counts.stream_id).filter(Counts.timestamp < timestamp)
+    subquery = session.query(StreamCount.stream_id,
+                             func.sum(StreamCount.particle_count).label('particle_count'),
+                             func.sum(StreamCount.seconds).label('seconds'))
+    subquery = subquery.group_by(StreamCount.stream_id).filter(StreamCount.collected_time > timestamp)
     if stream_id:
-        subquery = subquery.filter(Counts.stream_id == stream_id)
+        subquery = subquery.filter(StreamCount.stream_id == stream_id)
     return subquery.subquery()
 
 
 def get_status_query(session, base_time, filter_refdes=None, filter_method=None, filter_stream=None, stream_id=None):
     filter_constraints = []
     if filter_refdes:
-        filter_constraints.append(ReferenceDesignator.name.like('%%%s%%' % filter_refdes))
+        filter_constraints.append(DeployedStream.reference_designator.like('%%%s%%' % filter_refdes))
     if filter_method:
         filter_constraints.append(ExpectedStream.method.like('%%%s%%' % filter_method))
     if filter_stream:
@@ -34,8 +33,6 @@ def get_status_query(session, base_time, filter_refdes=None, filter_method=None,
     day_ago = base_time - timedelta(days=1)
     week_ago = base_time - timedelta(days=7)
 
-    # subquery to get the latest count and timestamp
-    now_subquery = build_counts_subquery(session, base_time, stream_id)
     five_min_subquery = build_counts_subquery(session, five_ago, stream_id)
     one_hour_subquery = build_counts_subquery(session, hour_ago, stream_id)
     one_day_subquery = build_counts_subquery(session, day_ago, stream_id)
@@ -43,36 +40,52 @@ def get_status_query(session, base_time, filter_refdes=None, filter_method=None,
 
     # Overall query, joins the three above subqueries with the DeployedStream table to produce our data
     query = session.query(DeployedStream,
-                          now_subquery.c.timestamp,
-                          now_subquery.c.particle_count,
-                          five_min_subquery.c.timestamp,
+                          five_min_subquery.c.seconds,
                           five_min_subquery.c.particle_count,
-                          one_hour_subquery.c.timestamp,
+                          one_hour_subquery.c.seconds,
                           one_hour_subquery.c.particle_count,
-                          one_day_subquery.c.timestamp,
+                          one_day_subquery.c.seconds,
                           one_day_subquery.c.particle_count,
-                          one_week_subquery.c.timestamp,
+                          one_week_subquery.c.seconds,
                           one_week_subquery.c.particle_count
-                          )
-    for subquery in [now_subquery, five_min_subquery, one_hour_subquery, one_day_subquery, one_week_subquery]:
+                          ).join(five_min_subquery)
+    # all subqueries but the current time are OUTER JOIN so that we will still generate a row
+    # even if no data exists
+    for subquery in [one_hour_subquery, one_day_subquery, one_week_subquery]:
         query = query.outerjoin(subquery)
 
     # Apply any filter constraints if supplied
     if filter_constraints:
-        query = query.join(ExpectedStream).join(ReferenceDesignator)
+        query = query.join(ExpectedStream)
         query = query.filter(and_(*filter_constraints))
 
     return query
 
 
+def resample(session, stream_id, start_time, end_time, seconds):
+    # fetch all count data in our window
+    query = session.query(StreamCount).filter(and_(StreamCount.stream_id == stream_id,
+                                                   StreamCount.collected_time >= start_time,
+                                                   StreamCount.collected_time < end_time))
+    counts_df = pd.read_sql_query(query.statement, query.session.bind, index_col='collected_time')
+    # resample to our new interval
+    resampled = counts_df.resample('%dS' % seconds).sum()
+    # drop the old records
+    session.query(StreamCount).filter(StreamCount.id.in_(list(counts_df.id.values))).delete(synchronize_session=False)
+    # insert the new records
+    for collected_time, _, _, particle_count, seconds in resampled.itertuples():
+        sc = StreamCount(stream_id=stream_id, collected_time=collected_time,
+                         particle_count=particle_count, seconds=seconds)
+        session.add(sc)
+    return resampled
+
+
 def get_hourly_rates(session, stream_id):
-    query = session.query(Counts).filter(Counts.stream_id == stream_id)
-    counts_df = pd.read_sql_query(query.statement, query.session.bind)
-    counts_df['particle_count'] = counts_df.particle_count.diff()
-    counts_df['elapsed'] = counts_df.timestamp.diff() / np.timedelta64(1, 's')
-    counts_df['rate'] = counts_df.particle_count / counts_df.elapsed
-    counts_df = counts_df.set_index('timestamp')
-    return counts_df[['rate']].resample('1H').mean()
+    query = session.query(StreamCount).filter(StreamCount.stream_id == stream_id)
+    counts_df = pd.read_sql_query(query.statement, query.session.bind, index_col='collected_time')
+    counts_df = counts_df.resample('1H').mean()
+    counts_df['rate'] = counts_df.particle_count / counts_df.seconds
+    return counts_df
 
 
 def compute_rate(current_count, current_timestamp, previous_count, previous_timestamp):
@@ -86,18 +99,18 @@ def compute_rate(current_count, current_timestamp, previous_count, previous_time
 
 def create_status_dict(row, base_time):
     if row:
-        (deployed_stream, current_time, current_count, five_min_time, five_min_count,
-         one_hour_time, one_hour_count, one_day_time, one_day_count, one_week_time, one_week_count) = row
+        (deployed_stream, five_min_time, five_min_count, one_hour_time, one_hour_count,
+         one_day_time, one_day_count, one_week_time, one_week_count) = row
 
         row_dict = deployed_stream.asdict()
 
-        five_min_rate = compute_rate(current_count, current_time, five_min_count, five_min_time)
-        one_hour_rate = compute_rate(current_count, current_time, one_hour_count, one_hour_time)
-        one_day_rate = compute_rate(current_count, current_time, one_day_count, one_day_time)
-        one_week_rate = compute_rate(current_count, current_time, one_week_count, one_week_time)
+        five_min_rate = five_min_count / five_min_time
+        one_hour_rate = one_hour_count / one_hour_time
+        one_day_rate = one_day_count / one_day_time
+        one_week_rate = one_week_count / one_week_time
 
         counts = {
-            'current': current_count,
+            'current': deployed_stream.particle_count,
             'five_mins': five_min_count,
             'one_hour': one_hour_count,
             'one_day': one_day_count,
@@ -111,15 +124,20 @@ def create_status_dict(row, base_time):
             'one_week': one_week_rate
         }
 
-        row_dict['last_seen'] = current_time
+        row_dict['last_seen'] = deployed_stream.last_seen
         row_dict['counts'] = counts
         row_dict['rates'] = rates
 
-        elapsed = base_time - current_time
-        elasped_seconds = elapsed.total_seconds()
+        if deployed_stream.last_seen:
+            elapsed = base_time - deployed_stream.last_seen
+            elasped_seconds = elapsed.total_seconds()
+            row_dict['elapsed'] = str(elapsed)
+        else:
+            elasped_seconds = 999999999
+        row_dict['elapsed_seconds'] = elasped_seconds
 
         es = deployed_stream.expected_stream
-        expected_rate = es.rate if deployed_stream.rate is None else deployed_stream.rate
+        expected_rate = es.expected_rate if deployed_stream.expected_rate is None else deployed_stream.expected_rate
         warn_interval = es.warn_interval if deployed_stream.warn_interval is None else deployed_stream.warn_interval
         fail_interval = es.fail_interval if deployed_stream.fail_interval is None else deployed_stream.fail_interval
 
@@ -145,5 +163,4 @@ def create_status_dict(row, base_time):
             status = 'DEGRADED'
 
         row_dict['status'] = status
-        row_dict['elapsed'] = str(elapsed)
         return row_dict

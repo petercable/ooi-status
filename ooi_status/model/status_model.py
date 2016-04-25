@@ -3,83 +3,89 @@ Track the CI particles being ingested into cassandra and store information into 
 
 @author Dan Mergens
 """
-from datetime import datetime
-from sqlalchemy import Column, Integer, String, Float, ForeignKey, DateTime
+import toolz
+from sqlalchemy import Column, Integer, String, Float, ForeignKey, DateTime, UniqueConstraint
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 
 Base = declarative_base()
 
 
-class ReferenceDesignator(Base):
-    __tablename__ = 'reference_designator'
-    id = Column(Integer, primary_key=True)
-    name = Column(String, unique=True, nullable=False)
-
-    def asdict(self):
-        fields = ['id', 'name']
-        return {field: getattr(self, field) for field in fields}
-
-    def __repr__(self):
-        return '{0}'.format(self.name)
-
-
 class ExpectedStream(Base):
     __tablename__ = 'expected_stream'
+    __table_args__ = (
+        UniqueConstraint('name', 'method'),
+    )
     id = Column(Integer, primary_key=True)
     name = Column(String, nullable=False)
     method = Column(String, nullable=False)
-    rate = Column(Float, default=0)  # 0 means untracked
-    warn_interval = Column(Integer, default=0)  # 0 means untracked
-    fail_interval = Column(Integer, default=0)  # 0 means untracked
+    expected_rate = Column(Float)
+    warn_interval = Column(Integer)
+    fail_interval = Column(Integer)
 
     def asdict(self):
-        fields = ['id', 'name', 'method', 'rate', 'warn_interval', 'fail_interval']
+        fields = ['id', 'name', 'method', 'expected_rate', 'warn_interval', 'fail_interval']
         return {field: getattr(self, field) for field in fields}
 
     def __repr__(self):
-        return '{0} {1} {2} Hz {3}/{4}'.format(self.name, self.method, self.rate, self.warn_interval, self.fail_interval)
+        return '{0} {1} {2} Hz {3}/{4}'.format(self.name, self.method, self.expected_rate, self.warn_interval, self.fail_interval)
 
 
 class DeployedStream(Base):
     __tablename__ = 'deployed_stream'
+    __table_args__ = (
+        UniqueConstraint('reference_designator', 'expected_stream_id'),
+    )
     id = Column(Integer, primary_key=True)
-    ref_des_id = Column(Integer, ForeignKey('reference_designator.id'), nullable=False)
-    ref_des = relationship(ReferenceDesignator, backref='deployed_streams', lazy='joined')
+    reference_designator = Column(String, nullable=False)
     expected_stream_id = Column(Integer, ForeignKey('expected_stream.id'), nullable=False)
+    particle_count = Column(Integer, nullable=False)
+    last_seen = Column(DateTime, nullable=False)
+    collected = Column(DateTime, nullable=False)
+    expected_rate = Column(Float)
+    warn_interval = Column(Integer)
+    fail_interval = Column(Integer)
     expected_stream = relationship(ExpectedStream, backref='deployed_streams', lazy='joined')
-    rate = Column(Float, default=-1)
-    warn_interval = Column(Integer, default=-1)
-    fail_interval = Column(Integer, default=-1)
 
     def asdict(self):
-        fields = ['ref_des', 'expected_stream', 'rate', 'warn_interval', 'fail_interval']
+        fields = ['id', 'reference_designator', 'expected_stream', 'expected_rate', 'warn_interval', 'fail_interval']
         return {field: getattr(self, field) for field in fields}
 
-    def last_seen(self, session):
-        last_count = session.query(Counts).filter(Counts.stream == self).order_by(Counts.timestamp.desc()).first()
-        if last_count:
-            return last_count.timestamp
-        else:
-            return datetime.utcfromtimestamp(0)
-
     def __repr__(self):
-        return '{0} {1}'.format(self.ref_des, self.expected_stream)
+        return '{0} {1} {2} {3}'.format(self.reference_designator, self.expected_stream, self.collected, self.particle_count)
+
+    @property
+    def status(self):
+        expected_rate = self.expected_rate if self.expected_rate else self.expected_stream.expected_rate
+
+        if expected_rate:
+            counts = self.stream_counts[-10:]
+            elapsed = sum((x.seconds for x in counts))
+            total = sum((x.particle_count for x in counts))
+            if elapsed:
+                rate = total / elapsed
+            else:
+                rate = 0
+
+            if rate == 0:
+                return 'FAILED'
+            elif rate < expected_rate:
+                return 'DEGRADED'
+            else:
+                return 'OPERATIONAL'
 
 
-class Counts(Base):
-    __tablename__ = 'counts'
+class StreamCount(Base):
+    __tablename__ = 'stream_count'
     id = Column(Integer, primary_key=True)
     stream_id = Column(Integer, ForeignKey('deployed_stream.id'), nullable=False)
-    stream = relationship(DeployedStream, backref='counts')
-    particle_count = Column(Integer, nullable=False)
-    timestamp = Column(DateTime, nullable=False)
-
-    def rate(self, count):
-        return abs((count.particle_count - self.particle_count) / (count.timestamp - self.timestamp).seconds)
+    collected_time = Column(DateTime, nullable=False)
+    particle_count = Column(Integer, default=0)
+    seconds = Column(Float, default=0)
+    stream = relationship(DeployedStream, backref='stream_counts')
 
     def __repr__(self):
-        return '{0} {1} particles at {2}'.format(self.stream, self.particle_count, self.timestamp)
+        return 'StreamCount(id=%d, count=%d, seconds=%f, rate=%f)' % (self.id, self.particle_count, self.seconds, self.particle_count / self.seconds)
 
 
 def create_database(engine, drop=False):
