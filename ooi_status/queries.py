@@ -1,25 +1,37 @@
-from datetime import timedelta
+import logging
+from collections import Counter
+from datetime import timedelta, datetime
 
 import pandas as pd
 from sqlalchemy import func
 from sqlalchemy.sql.elements import and_
 
-from ooi_status.model.status_model import ExpectedStream, DeployedStream, StreamCount
+from ooi_status.emailnotifier import EmailNotifier
+from ooi_status.get_logger import get_logger
+from ooi_status.model.status_model import ExpectedStream, DeployedStream, StreamCount, StreamCondition
 
-RATE_ACCEPTABLE_DEVIATION = 0.2
+RATE_ACCEPTABLE_DEVIATION = 0.3
 
 
-def build_counts_subquery(session, timestamp, stream_id=None):
-    subquery = session.query(StreamCount.stream_id,
-                             func.sum(StreamCount.particle_count).label('particle_count'),
-                             func.sum(StreamCount.seconds).label('seconds'))
-    subquery = subquery.group_by(StreamCount.stream_id).filter(StreamCount.collected_time > timestamp)
+log = get_logger(__name__, logging.INFO)
+
+
+def build_counts_subquery(session, timestamp, stream_id=None, first=False):
+    fields = [StreamCount.stream_id,
+              func.sum(StreamCount.particle_count).label('particle_count'),
+              func.sum(StreamCount.seconds).label('seconds')]
+
+    if first:
+        fields.append(func.max(StreamCount.collected_time).label('collected_time'))
+
+    subquery = session.query(*fields).group_by(StreamCount.stream_id).filter(StreamCount.collected_time > timestamp)
     if stream_id:
         subquery = subquery.filter(StreamCount.stream_id == stream_id)
     return subquery.subquery()
 
 
-def get_status_query(session, base_time, filter_refdes=None, filter_method=None, filter_stream=None, stream_id=None):
+def get_status_query(session, base_time, filter_refdes=None, filter_method=None,
+                     filter_stream=None, stream_id=None, windows=None):
     filter_constraints = []
     if filter_refdes:
         filter_constraints.append(DeployedStream.reference_designator.like('%%%s%%' % filter_refdes))
@@ -28,30 +40,26 @@ def get_status_query(session, base_time, filter_refdes=None, filter_method=None,
     if filter_stream:
         filter_constraints.append(ExpectedStream.name.like('%%%s%%' % filter_stream))
 
-    five_ago = base_time - timedelta(minutes=5)
-    hour_ago = base_time - timedelta(hours=1)
-    day_ago = base_time - timedelta(days=1)
-    week_ago = base_time - timedelta(days=7)
+    if windows is None:
+        windows = [{'minutes': 5}, {'hours': 1}, {'days': 1}, {'days': 7}]
 
-    five_min_subquery = build_counts_subquery(session, five_ago, stream_id)
-    one_hour_subquery = build_counts_subquery(session, hour_ago, stream_id)
-    one_day_subquery = build_counts_subquery(session, day_ago, stream_id)
-    one_week_subquery = build_counts_subquery(session, week_ago, stream_id)
+    subqueries = []
+    fields = [DeployedStream]
+    for index, window in enumerate(windows):
+        first = index == 0
+        window_time = base_time - timedelta(**window)
+        window_subquery = build_counts_subquery(session, window_time, stream_id, first=first)
+        subqueries.append(window_subquery)
+        if first:
+            fields.append(window_subquery.c.collected_time)
+        fields.append(window_subquery.c.seconds)
+        fields.append(window_subquery.c.particle_count)
 
     # Overall query, joins the three above subqueries with the DeployedStream table to produce our data
-    query = session.query(DeployedStream,
-                          five_min_subquery.c.seconds,
-                          five_min_subquery.c.particle_count,
-                          one_hour_subquery.c.seconds,
-                          one_hour_subquery.c.particle_count,
-                          one_day_subquery.c.seconds,
-                          one_day_subquery.c.particle_count,
-                          one_week_subquery.c.seconds,
-                          one_week_subquery.c.particle_count
-                          ).join(five_min_subquery)
+    query = session.query(*fields).join(subqueries[0])
     # all subqueries but the current time are OUTER JOIN so that we will still generate a row
     # even if no data exists
-    for subquery in [one_hour_subquery, one_day_subquery, one_week_subquery]:
+    for subquery in subqueries[1:]:
         query = query.outerjoin(subquery)
 
     # Apply any filter constraints if supplied
@@ -97,9 +105,9 @@ def compute_rate(current_count, current_timestamp, previous_count, previous_time
     return 1.0 * (current_count - previous_count) / elapsed
 
 
-def create_status_dict(row, base_time):
+def create_status_dict(row):
     if row:
-        (deployed_stream, five_min_time, five_min_count, one_hour_time, one_hour_count,
+        (deployed_stream, collected_time, five_min_time, five_min_count, one_hour_time, one_hour_count,
          one_day_time, one_day_count, one_week_time, one_week_count) = row
 
         row_dict = deployed_stream.asdict()
@@ -109,14 +117,6 @@ def create_status_dict(row, base_time):
         one_day_rate = one_day_count / one_day_time
         one_week_rate = one_week_count / one_week_time
 
-        counts = {
-            'current': deployed_stream.particle_count,
-            'five_mins': five_min_count,
-            'one_hour': one_hour_count,
-            'one_day': one_day_count,
-            'one_week': one_week_count
-        }
-
         rates = {
             'five_mins': five_min_rate,
             'one_hour': one_hour_rate,
@@ -125,42 +125,195 @@ def create_status_dict(row, base_time):
         }
 
         row_dict['last_seen'] = deployed_stream.last_seen
-        row_dict['counts'] = counts
         row_dict['rates'] = rates
 
         if deployed_stream.last_seen:
-            elapsed = base_time - deployed_stream.last_seen
-            elasped_seconds = elapsed.total_seconds()
+            elapsed = collected_time - deployed_stream.last_seen
+            elapsed_seconds = elapsed.total_seconds()
             row_dict['elapsed'] = str(elapsed)
         else:
-            elasped_seconds = 999999999
-        row_dict['elapsed_seconds'] = elasped_seconds
+            elapsed_seconds = 999999999
 
-        es = deployed_stream.expected_stream
-        expected_rate = es.expected_rate if deployed_stream.expected_rate is None else deployed_stream.expected_rate
-        warn_interval = es.warn_interval if deployed_stream.warn_interval is None else deployed_stream.warn_interval
-        fail_interval = es.fail_interval if deployed_stream.fail_interval is None else deployed_stream.fail_interval
+        row_dict['elapsed_seconds'] = elapsed_seconds
+        row_dict['status'] = get_status(deployed_stream, elapsed_seconds, five_min_rate, one_day_rate)
+        return row_dict
+
+
+def get_status(deployed_stream, elapsed_seconds, five_min_rate, one_day_rate):
+        if deployed_stream.disabled:
+            return 'DISABLED'
+
+        expected_rate = deployed_stream.get_expected_rate()
+        warn_interval = deployed_stream.get_warn_interval()
+        fail_interval = deployed_stream.get_fail_interval()
+
+        if not any([expected_rate, fail_interval, warn_interval]):
+            return 'UNTRACKED'
+
+        if fail_interval > 0:
+            if elapsed_seconds > fail_interval * 700:
+                return 'DEAD'
+            elif elapsed_seconds > fail_interval:
+                return 'FAILED'
+
+        if 0 < warn_interval < elapsed_seconds:
+            return 'DEGRADED'
 
         if expected_rate > 0:
             five_min_percent = 1 - RATE_ACCEPTABLE_DEVIATION
             one_day_percent = 1 - (RATE_ACCEPTABLE_DEVIATION / (86400 / 300.0))
             five_min_thresh = expected_rate * five_min_percent
             one_day_thresh = expected_rate * one_day_percent
-            thresh = {'one_day_thresh': one_day_thresh, 'five_min_thresh': five_min_thresh}
-            row_dict['rate_thresholds'] = thresh
 
-        status = 'OPERATIONAL'
-        if not any([expected_rate, fail_interval, warn_interval]):
-            status = 'NOSTATUS'
-        elif fail_interval > 0:
-            if elasped_seconds > fail_interval * 700:
-                status = 'DEAD'
-            elif elasped_seconds > fail_interval:
-                status = 'FAILED'
-        elif 0 < warn_interval < elasped_seconds:
-            status = 'DEGRADED'
-        elif expected_rate > 0 and (five_min_rate < five_min_thresh and one_day_rate < one_day_thresh):
-            status = 'DEGRADED'
+            log.error('THRESH: %s %s', five_min_thresh, one_day_thresh)
 
-        row_dict['status'] = status
-        return row_dict
+            if (five_min_rate < five_min_thresh) and (one_day_rate < one_day_thresh):
+                return 'DEGRADED'
+
+        return 'OPERATIONAL'
+
+
+def get_status_by_instrument(session, filter_refdes=None, filter_method=None, filter_stream=None, filter_status=None):
+    base_time = get_base_time()
+    query = get_status_query(session, base_time, filter_refdes, filter_method, filter_stream)
+
+    # group by reference designator
+    out_dict = {}
+    for row in query:
+        row_dict = create_status_dict(row)
+        refdes = row_dict.pop('reference_designator')
+        out_dict.setdefault(refdes, []).append(row_dict)
+
+    out = []
+    # create a rollup status
+    for refdes in out_dict:
+        streams = out_dict[refdes]
+        statuses = [stream.get('status') for stream in streams]
+        if 'DEAD' in statuses:
+            status = 'DEAD'
+        elif 'FAILED' in statuses:
+            status = 'FAILED'
+        elif 'DEGRADED' in statuses:
+            status = 'DEGRADED'
+        elif 'OPERATIONAL' in statuses:
+            status = 'OPERATIONAL'
+        else:
+            status = statuses[0]
+
+        if not filter_status or filter_status == status:
+            out.append({'reference_designator': refdes, 'streams': streams, 'status': status})
+
+    counts = Counter()
+    for row in out:
+        counts[row['status']] += 1
+
+    return {'counts': counts, 'instruments': out, 'num_records': len(out)}
+
+
+def get_base_time():
+    return datetime.utcnow().replace(second=0, microsecond=0)
+
+
+def get_status_by_stream(session, filter_refdes=None, filter_method=None, filter_stream=None, filter_status=None):
+    base_time = get_base_time()
+    query = get_status_query(session, base_time, filter_refdes, filter_method, filter_stream)
+
+    out = []
+    for row in query:
+        row_dict = create_status_dict(row)
+
+        if not filter_status or filter_status == row_dict['status']:
+            out.append(row_dict)
+
+    counts = Counter()
+    for row in out:
+        counts[row['status']] += 1
+
+    return {'counts': counts, 'streams': out, 'num_records': len(out)}
+
+
+def get_status_by_stream_id(session, deployed_id):
+    base_time = get_base_time()
+    query = get_status_query(session, base_time, stream_id=deployed_id)
+    result = query.first()
+    if result is not None:
+        row_dict = create_status_dict(result)
+        counts_df = get_hourly_rates(session, deployed_id)
+        return {'deployed': row_dict, 'hours': list(counts_df.index), 'rates': list(counts_df.rate)}
+
+
+def get_status_for_notification(session):
+    base_time = get_base_time()
+    query = get_status_query(session, base_time, windows=[{'minutes': 5}, {'days': 1}])
+    status_dict = {}
+    for row in query:
+        deployed_stream, collected_time, five_min_time, five_min_count, one_day_time, one_day_count = row
+
+        five_min_rate = five_min_count / five_min_time
+        one_day_rate = one_day_count / one_day_time
+
+        if deployed_stream.last_seen:
+            elapsed = collected_time - deployed_stream.last_seen
+            elapsed_seconds = elapsed.total_seconds()
+        else:
+            elapsed_seconds = -1
+
+        status = get_status(deployed_stream, elapsed_seconds, five_min_rate, one_day_rate)
+        condition = deployed_stream.stream_condition
+        if condition is None:
+            now = datetime.utcnow()
+            condition = StreamCondition(deployed_stream=deployed_stream, last_status=status, last_status_time=now)
+            session.add(condition)
+
+        if condition.last_status != status:
+            d = {
+                'id': deployed_stream.id,
+                'stream': deployed_stream.expected_stream.name,
+                'method': deployed_stream.expected_stream.method,
+                'last_status': condition.last_status,
+                'new_status': status,
+                'expected_rate': deployed_stream.get_expected_rate(),
+                'warn_interval': deployed_stream.get_warn_interval(),
+                'fail_interval': deployed_stream.get_fail_interval(),
+                'elapsed': elapsed_seconds,
+                'five_minute_rate': five_min_rate,
+                'one_day_rate': one_day_rate,
+                'arrow': get_arrow(condition.last_status, status)
+            }
+            status_dict.setdefault(deployed_stream.reference_designator, []).append(d)
+            condition.last_status = status
+
+    if status_dict:
+        notify(status_dict)
+    return {'status': status_dict}
+
+
+def get_arrow(last_status, new_status):
+    RIGHT = '&rarr;'
+    UP = '&uarr;'
+    DOWN = '&darr;'
+    ignore = ['UNTRACKED', 'DISABLED']
+
+    if last_status in ignore or new_status in ignore:
+        return RIGHT
+
+    weights = {
+        'OPERATIONAL': 0,
+        'DEGRADED': 1,
+        'FAILED': 2,
+        'DEAD': 3
+    }
+    last_weight = weights.get(last_status, 0)
+    new_weight = weights.get(new_status, 0)
+
+    if last_weight > new_weight:
+        return UP
+    return DOWN
+
+
+def notify(status_dict):
+    noreply = 'noreply@ooi.rutgers.edu'  # config
+    notify_list = ['petercable+ooistatus@gmail.com', 'danmergens+ooistatus@gmail.com']  # database
+    notify_subject = 'OOI STATUS CHANGE NOTIFICATION'  # config
+    notifier = EmailNotifier('localhost')
+    notifier.send_status(noreply, notify_list, notify_subject, status_dict)

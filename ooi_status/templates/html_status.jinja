@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>Status Change</title>
+</head>
+<body>
+    <h1>The following streams changed status:</h1>
+    <table cellspacing="0" cellpadding="5">
+        <tr>
+            <td style="border: 1px solid black">Stream</td>
+            <td style="border: 1px solid black">Method</td>
+            <td style="border: 1px solid black">Previous</td>
+            <td style="border: 1px solid black">Current</td>
+            <td style="border: 1px solid black">Expected Rate</td>
+            <td style="border: 1px solid black">Warn Interval</td>
+            <td style="border: 1px solid black">Fail Interval</td>
+            <td style="border: 1px solid black">Elapsed Seconds</td>
+            <td style="border: 1px solid black">Five Minute Rate</td>
+            <td style="border: 1px solid black">One Day Rate</td>
+            <td style="border: 1px solid black">Change</td>
+        </tr>
+{% for reference_designator in status_dict %}
+        <tr>
+            <td style="border: 1px solid black" colspan=11><strong>{{ reference_designator }}</strong></td>
+        </tr>
+{% for row in status_dict[reference_designator] %}
+        <tr>
+            <td style="border: 1px solid black"><a href="{{ base_url }}/stream/{{ row.id }}">{{ row.stream }}</a></td>
+            <td style="border: 1px solid black">{{ row.method }}</td>
+            <td style="border: 1px solid black">{{ row.last_status }}</td>
+            <td style="border: 1px solid black">{{ row.new_status }}</td>
+            <td style="border: 1px solid black">{{ row.expected_rate|round(5) }}</td>
+            <td style="border: 1px solid black">{{ row.warn_interval }}</td>
+            <td style="border: 1px solid black">{{ row.fail_interval }}</td>
+            <td style="border: 1px solid black">{{ row.elapsed|round(5) }}</td>
+            <td style="border: 1px solid black">{{ row.five_minute_rate|round(5) }}</td>
+            <td style="border: 1px solid black">{{ row.one_day_rate|round(5) }}</td>
+            <td style="border: 1px solid black">{{ row.arrow }}</td>
+        </tr>
+{% endfor %}
+{% endfor %}
+    </table>
+</body>
+</html>
+

@@ -46,6 +46,7 @@ class DeployedStream(Base):
     warn_interval = Column(Integer)
     fail_interval = Column(Integer)
     expected_stream = relationship(ExpectedStream, backref='deployed_streams', lazy='joined')
+    stream_condition = relationship('StreamCondition', uselist=False, back_populates="deployed_stream")
 
     def asdict(self):
         fields = ['id', 'reference_designator', 'expected_stream', 'expected_rate', 'warn_interval', 'fail_interval']
@@ -54,25 +55,45 @@ class DeployedStream(Base):
     def __repr__(self):
         return '{0} {1} {2} {3}'.format(self.reference_designator, self.expected_stream, self.collected, self.particle_count)
 
+    def get_expected_rate(self):
+        return self.expected_stream.expected_rate if self.expected_rate is None else self.expected_rate
+
+    def get_warn_interval(self):
+        return self.expected_stream.warn_interval if self.warn_interval is None else self.warn_interval
+
+    def get_fail_interval(self):
+        return self.expected_stream.fail_interval if self.fail_interval is None else self.fail_interval
+
     @property
-    def status(self):
-        expected_rate = self.expected_rate if self.expected_rate else self.expected_stream.expected_rate
+    def disabled(self):
+        return all((
+            self.expected_rate == 0,
+            self.warn_interval == 0,
+            self.fail_interval == 0
+        ))
 
-        if expected_rate:
-            counts = self.stream_counts[-10:]
-            elapsed = sum((x.seconds for x in counts))
-            total = sum((x.particle_count for x in counts))
-            if elapsed:
-                rate = total / elapsed
-            else:
-                rate = 0
+    def disable(self):
+        self.expected_rate = 0
+        self.warn_interval = 0
+        self.fail_interval = 0
 
-            if rate == 0:
-                return 'FAILED'
-            elif rate < expected_rate:
-                return 'DEGRADED'
-            else:
-                return 'OPERATIONAL'
+    def enable(self):
+        self.expected_rate = None
+        self.warn_interval = None
+        self.fail_interval = None
+
+
+class StreamCondition(Base):
+    __tablename__ = 'stream_condition'
+    __table_args__ = (
+        UniqueConstraint('stream_id'),
+    )
+    id = Column(Integer, primary_key=True)
+    stream_id = Column(Integer, ForeignKey('deployed_stream.id'), nullable=False)
+    last_status_time = Column(DateTime, nullable=False)
+    last_status = Column(String, nullable=False)
+
+    deployed_stream = relationship('DeployedStream', back_populates='stream_condition')
 
 
 class StreamCount(Base):

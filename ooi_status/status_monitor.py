@@ -14,7 +14,7 @@ from sqlalchemy.sql.elements import and_
 
 from get_logger import get_logger
 from ooi_status.model.status_model import DeployedStream, ExpectedStream, StreamCount
-from ooi_status.queries import resample
+from ooi_status.queries import resample, get_status_for_notification
 from stop_watch import stopwatch
 
 log = get_logger(__name__, logging.INFO)
@@ -110,6 +110,12 @@ class BaseStatusMonitor(object):
             # resample all count data from now-48 to now-24 to 1 hour
             with session.begin():
                 resample(session, deployed_stream.id, fourty_eight_ago, twenty_four_ago, 3600)
+
+    def check_for_notify(self):
+        session = self.session_factory()
+        with session.begin():
+            status = get_status_for_notification(session)
+            log.info(status)
 
 
 class CassStatusMonitor(BaseStatusMonitor):

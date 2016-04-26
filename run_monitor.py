@@ -35,8 +35,12 @@ def main(casshost, posthost, uframehost):
 
     scheduler = BlockingScheduler()
     log.info('adding jobs')
+    # gather data every minute
     scheduler.add_job(monitor.gather_all, 'cron', second=0)
+    # resample data every hour
     scheduler.add_job(monitor.resample_count_data_hourly, 'cron', minute=0)
+    # notify on change every 5 minutes
+    scheduler.add_job(monitor.check_for_notify, 'cron', minute='*/5')
     log.info('starting jobs')
     scheduler.start()
 

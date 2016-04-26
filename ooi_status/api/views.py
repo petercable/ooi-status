@@ -1,54 +1,170 @@
-from collections import Counter
-from datetime import datetime
+import httplib
 
 from flask import jsonify, request
 from werkzeug.exceptions import abort
 
 from ooi_status.api import app, db
-from ooi_status.model.status_model import ExpectedStream
-from ooi_status.queries import get_status_query, get_hourly_rates, create_status_dict
+from ooi_status.model.status_model import ExpectedStream, DeployedStream
+from ooi_status.queries import (get_status_by_instrument, get_status_by_stream, get_status_by_stream_id,
+                                get_status_for_notification)
 
 
 @app.route('/expected')
 def expected():
-    expected = db.session.query(ExpectedStream).all()
-    return jsonify({'expected_streams': [e.asdict() for e in expected]})
+    filter_method = request.args.get('method')
+    filter_stream = request.args.get('stream')
+    expected_streams = db.session.query(ExpectedStream)
+
+    if filter_method:
+        expected_streams = expected_streams.filter(ExpectedStream.method == filter_method)
+
+    if filter_stream:
+        expected_streams = expected_streams.filter(ExpectedStream.name == filter_stream)
+
+    return jsonify({'expected_streams': [e.asdict() for e in expected_streams]})
 
 
-@app.route('/status')
-def last_seen():
+@app.route('/expected/<int:expected_id>')
+def expected_by_id(expected_id):
+    expected_stream = db.session.query(ExpectedStream).get(expected_id)
+    if expected_stream:
+        return jsonify(expected_stream.asdict())
+
+    abort(httplib.NOT_FOUND)
+
+
+@app.route('/expected/<int:expected_id>', methods=['PATCH'])
+def update_expected_by_id(expected_id):
+    expected_stream = db.session.query(ExpectedStream).get(expected_id)
+    if expected_stream:
+        patch = request.json
+        # if an ID is passed, verify it matches the query id
+        if 'id' in patch:
+            if expected_id != patch['id']:
+                abort(httplib.BAD_REQUEST)
+        if 'expected_rate' in patch:
+            expected_stream.expected_rate = patch['expected_rate']
+        if 'warn_interval' in patch:
+            expected_stream.warn_interval = patch['warn_interval']
+        if 'fail_interval' in patch:
+            expected_stream.fail_interval = patch['fail_interval']
+        db.session.commit()
+        return jsonify(expected_stream.asdict())
+
+    abort(httplib.NOT_FOUND)
+
+
+@app.route('/deployed/<int:deployed_id>')
+def deployed_by_id(deployed_id):
+    deployed_stream = db.session.query(DeployedStream).get(deployed_id)
+    if deployed_stream:
+        return jsonify(deployed_stream.asdict())
+
+    abort(httplib.NOT_FOUND)
+
+
+@app.route('/deployed/<int:deployed_id>', methods=['PATCH'])
+def update_deployed_by_id(deployed_id):
+    deployed_stream = db.session.query(DeployedStream).get(deployed_id)
+    if deployed_stream:
+        patch = request.json
+        # if an ID is passed, verify it matches the query id
+        if 'id' in patch:
+            if deployed_id != patch['id']:
+                abort(httplib.BAD_REQUEST)
+        if 'expected_rate' in patch:
+            deployed_stream.expected_rate = patch['expected_rate']
+        if 'warn_interval' in patch:
+            deployed_stream.warn_interval = patch['warn_interval']
+        if 'fail_interval' in patch:
+            deployed_stream.fail_interval = patch['fail_interval']
+        db.session.commit()
+        return jsonify(deployed_stream.asdict())
+
+    abort(httplib.NOT_FOUND)
+
+
+@app.route('/stream')
+def get_streams():
     filter_status = request.args.get('status')
     filter_refdes = request.args.get('refdes')
     filter_method = request.args.get('method')
     filter_stream = request.args.get('stream')
 
-    base_time = datetime.utcnow().replace(second=0, microsecond=0)
-    query = get_status_query(db.session, base_time, filter_refdes, filter_method, filter_stream)
-
-    out = []
-    for row in query:
-        row_dict = create_status_dict(row, base_time)
-
-        if not filter_status or filter_status == row_dict['status']:
-            out.append(row_dict)
-
-    counts = Counter()
-    for row in out:
-        counts[row['status']] += 1
-
-    return jsonify({'counts': counts, 'status': out, 'num_records': len(out)})
+    return jsonify(get_status_by_stream(db.session, filter_refdes, filter_method, filter_stream, filter_status))
 
 
-@app.route('/status/<deployed_id>')
-def last_seen_detail(deployed_id):
-    base_time = datetime.utcnow().replace(second=0, microsecond=0)
-    query = get_status_query(db.session, base_time, stream_id=deployed_id)
-    result = query.first()
-    if result is not None:
-        row_dict = create_status_dict(result, base_time)
-        counts_df = get_hourly_rates(db.session, deployed_id)
-        return jsonify({'deployed': row_dict, 'hours': list(counts_df.index), 'rates': list(counts_df.rate)})
+@app.route('/stream/<int:deployed_id>')
+def get_stream(deployed_id):
+    status = get_status_by_stream_id(db.session, deployed_id)
+    if status:
+        return jsonify(status)
 
-    abort(404)
+    abort(httplib.NOT_FOUND)
 
 
+@app.route('/instrument')
+def get_instruments():
+    filter_status = request.args.get('status')
+    filter_refdes = request.args.get('refdes')
+    filter_method = request.args.get('method')
+    filter_stream = request.args.get('stream')
+
+    return jsonify(get_status_by_instrument(db.session, filter_refdes, filter_method, filter_stream, filter_status))
+
+
+@app.route('/instrument/<filter_refdes>')
+def get_instrument(filter_refdes):
+    filter_status = request.args.get('status')
+    filter_method = request.args.get('method')
+    filter_stream = request.args.get('stream')
+
+    return jsonify(get_status_by_instrument(db.session, filter_refdes, filter_method, filter_stream, filter_status))
+
+
+@app.route('/stream/<int:deployed_id>/disable')
+def disable_by_id(deployed_id):
+    deployed = db.session.query(DeployedStream).get(deployed_id)
+    if deployed:
+        deployed.disable()
+        db.session.commit()
+
+    return jsonify(get_status_by_stream_id(db.session, deployed_id))
+
+
+@app.route('/stream/<int:deployed_id>/enable')
+def enable_by_id(deployed_id):
+    deployed = db.session.query(DeployedStream).get(deployed_id)
+    if deployed:
+        deployed.enable()
+        db.session.commit()
+
+    return jsonify(get_status_by_stream_id(db.session, deployed_id))
+
+
+@app.route('/instrument/<refdes>/disable')
+def disable_by_refdes(refdes):
+    deployed = db.session.query(DeployedStream).filter(DeployedStream.reference_designator == refdes)
+    for each in deployed:
+        each.disable()
+    db.session.commit()
+
+    return jsonify(get_status_by_instrument(db.session, filter_refdes=refdes))
+
+
+@app.route('/instrument/<refdes>/enable')
+def enable_by_refdes(refdes):
+    deployed = db.session.query(DeployedStream).filter(DeployedStream.reference_designator == refdes)
+    for each in deployed:
+        each.enable()
+    db.session.commit()
+
+    return jsonify(get_status_by_instrument(db.session, filter_refdes=refdes))
+
+
+@app.route('/notify')
+def notify():
+    status = get_status_for_notification(db.session)
+    if status:
+        db.session.commit()
+    return jsonify(status)

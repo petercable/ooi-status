@@ -1,0 +1,18 @@
+The following streams changed status:
+{% for reference_designator in status_dict %}
+
+{{ reference_designator }}
+{% for row in status_dict[reference_designator] %}
+  Stream: {{ row.stream }}
+  Method: {{ row.method }}
+  Previous: {{ row.last_status }}
+  Current: {{ row.new_status }}
+  Expected Rate: {{ row.expected_rate|round(5) }}
+  Warn Interval: {{ row.warn_interval }}
+  Fail Interval: {{ row.fail_interval }}
+  Elapsed Seconds: {{ row.elapsed|round(5) }}
+  Five Minute Rate: {{ row.five_minute_rate|round(5) }}
+  One Day Rate: {{ row.one_day_rate|round(5) }}
+
+{% endfor %}
+{% endfor %}
