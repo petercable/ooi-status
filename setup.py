@@ -1,11 +1,11 @@
-from setuptools import setup
+from setuptools import setup, find_packages
 
 setup(
     name='OOINet Status',
     version='0.0.1',
     url='https://github.com/oceanobservatories/ooi-status',
     long_description=__doc__,
-    packages=['ooi_status'],
+    packages=find_packages(exclude=['test']),
     include_package_data=True,
     zip_safe=False,
     install_requires=['Flask>=0.10',
