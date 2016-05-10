@@ -13,12 +13,13 @@ test_status = '''
         "fail_interval": 600,
         "five_minute_rate": 2.8001113666515214,
         "id": 2514,
-        "last_status": "DEGRADED",
+        "last_status": "OPERATIONAL",
         "method": "streamed",
-        "new_status": "OPERATIONAL",
+        "new_status": "DEGRADED",
         "one_day_rate": 3.975965778173281,
         "stream": "ctdpf_sbe43_sample",
-        "warn_interval": 120
+        "warn_interval": 120,
+        "color": "orange"
       }
     ],
     "CE04OSPS-SF01B-3A-FLORTD104": [
@@ -31,10 +32,11 @@ test_status = '''
         "id": 1070,
         "last_status": "DEGRADED",
         "method": "streamed",
-        "new_status": "OPERATIONAL",
+        "new_status": "FAILED",
         "one_day_rate": 0.8289498062248218,
         "stream": "flort_d_data_record",
-        "warn_interval": 120
+        "warn_interval": 120,
+        "color": "red"
       }
     ],
     "CE04OSPS-SF01B-4B-VELPTD106": [
@@ -50,7 +52,8 @@ test_status = '''
         "new_status": "OPERATIONAL",
         "one_day_rate": 3.975977344215421,
         "stream": "velpt_velocity_data",
-        "warn_interval": 120
+        "warn_interval": 120,
+        "color": "black"
       }
     ],
     "RS01SLBS-LJ01A-05-HPIESA101": [
@@ -66,7 +69,8 @@ test_status = '''
         "new_status": "OPERATIONAL",
         "one_day_rate": 0.790053206507585,
         "stream": "horizontal_electric_field",
-        "warn_interval": 120
+        "warn_interval": 120,
+        "color": "black"
       },
       {
         "arrow": "&nearr;",
@@ -80,7 +84,8 @@ test_status = '''
         "new_status": "OPERATIONAL",
         "one_day_rate": 0.016655100681778452,
         "stream": "hpies_data_header",
-        "warn_interval": 1200
+        "warn_interval": 1200,
+        "color": "black"
       },
       {
         "arrow": "&nearr;",
@@ -94,7 +99,8 @@ test_status = '''
         "new_status": "OPERATIONAL",
         "one_day_rate": 0.18320610749956298,
         "stream": "motor_current",
-        "warn_interval": 120
+        "warn_interval": 120,
+        "color": "black"
       }
     ]
   }
@@ -114,4 +120,5 @@ class TemplateTest(unittest.TestCase):
 
     def test_html_template(self):
         template = self.env.get_template('html_status.jinja')
-        print template.render(status_dict=test_status, base_url='http://localhost')
+        text = template.render(status_dict=test_status, base_url='http://localhost')
+        open('test.html', 'w').write(text)

@@ -114,8 +114,7 @@ class BaseStatusMonitor(object):
     def check_for_notify(self):
         session = self.session_factory()
         with session.begin():
-            status = get_status_for_notification(session)
-            log.info(status)
+            get_status_for_notification(session)
 
 
 class CassStatusMonitor(BaseStatusMonitor):

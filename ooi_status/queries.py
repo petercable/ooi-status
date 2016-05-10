@@ -11,7 +11,9 @@ from ooi_status.get_logger import get_logger
 from ooi_status.model.status_model import ExpectedStream, DeployedStream, StreamCount, StreamCondition
 
 RATE_ACCEPTABLE_DEVIATION = 0.3
-
+RIGHT = '&rarr;'
+UP = '&uarr;'
+DOWN = '&darr;'
 
 log = get_logger(__name__, logging.INFO)
 
@@ -77,20 +79,22 @@ def resample(session, stream_id, start_time, end_time, seconds):
                                                    StreamCount.collected_time < end_time))
     counts_df = pd.read_sql_query(query.statement, query.session.bind, index_col='collected_time')
     # resample to our new interval
-    resampled = counts_df.resample('%dS' % seconds).sum()
-    # drop the old records
-    session.query(StreamCount).filter(StreamCount.id.in_(list(counts_df.id.values))).delete(synchronize_session=False)
-    # insert the new records
-    for collected_time, _, _, particle_count, seconds in resampled.itertuples():
-        sc = StreamCount(stream_id=stream_id, collected_time=collected_time,
-                         particle_count=particle_count, seconds=seconds)
-        session.add(sc)
-    return resampled
+    if len(counts_df) > 0:
+        resampled = counts_df.resample('%dS' % seconds).sum()
+        # drop the old records
+        session.query(StreamCount).filter(StreamCount.id.in_(list(counts_df.id.values))).delete(synchronize_session=False)
+        # insert the new records
+        for collected_time, _, _, particle_count, seconds in resampled.itertuples():
+            sc = StreamCount(stream_id=stream_id, collected_time=collected_time,
+                             particle_count=particle_count, seconds=seconds)
+            session.add(sc)
+        return resampled
 
 
-def get_hourly_rates(session, stream_id):
+def get_data_rates(session, stream_id):
     query = session.query(StreamCount).filter(StreamCount.stream_id == stream_id)
     counts_df = pd.read_sql_query(query.statement, query.session.bind, index_col='collected_time')
+    counts_df.sort_index(inplace=True)
     counts_df = counts_df.resample('1H').mean()
     counts_df['rate'] = counts_df.particle_count / counts_df.seconds
     return counts_df
@@ -165,8 +169,6 @@ def get_status(deployed_stream, elapsed_seconds, five_min_rate, one_day_rate):
             five_min_thresh = expected_rate * five_min_percent
             one_day_thresh = expected_rate * one_day_percent
 
-            log.error('THRESH: %s %s', five_min_thresh, one_day_thresh)
-
             if (five_min_rate < five_min_thresh) and (one_day_rate < one_day_thresh):
                 return 'DEGRADED'
 
@@ -232,14 +234,18 @@ def get_status_by_stream(session, filter_refdes=None, filter_method=None, filter
     return {'counts': counts, 'streams': out, 'num_records': len(out)}
 
 
-def get_status_by_stream_id(session, deployed_id):
+def get_status_by_stream_id(session, deployed_id, include_rates=True):
     base_time = get_base_time()
     query = get_status_query(session, base_time, stream_id=deployed_id)
     result = query.first()
     if result is not None:
         row_dict = create_status_dict(result)
-        counts_df = get_hourly_rates(session, deployed_id)
-        return {'deployed': row_dict, 'hours': list(counts_df.index), 'rates': list(counts_df.rate)}
+        d = {'deployed': row_dict}
+        if include_rates:
+            counts_df = get_data_rates(session, deployed_id)
+            d['rates'] = list(counts_df.rate)
+            d['hours'] = list(counts_df.index)
+        return d
 
 
 def get_status_for_notification(session):
@@ -278,7 +284,8 @@ def get_status_for_notification(session):
                 'elapsed': elapsed_seconds,
                 'five_minute_rate': five_min_rate,
                 'one_day_rate': one_day_rate,
-                'arrow': get_arrow(condition.last_status, status)
+                'arrow': get_arrow(condition.last_status, status),
+                'color': get_color(status)
             }
             status_dict.setdefault(deployed_stream.reference_designator, []).append(d)
             condition.last_status = status
@@ -288,10 +295,16 @@ def get_status_for_notification(session):
     return {'status': status_dict}
 
 
+def get_color(new_status):
+    colors = {
+        'DEGRADED': 'orange',
+        'FAILED': 'red',
+        'DEAD': 'red'
+    }
+    return colors.get(new_status, 'black')
+
+
 def get_arrow(last_status, new_status):
-    RIGHT = '&rarr;'
-    UP = '&uarr;'
-    DOWN = '&darr;'
     ignore = ['UNTRACKED', 'DISABLED']
 
     if last_status in ignore or new_status in ignore:

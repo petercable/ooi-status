@@ -1,8 +1,11 @@
 import os
 from flask import Flask
 from flask.json import JSONEncoder
-from flask_sqlalchemy import SQLAlchemy
+# from flask_sqlalchemy import SQLAlchemy
 from flask.ext.compress import Compress
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker, scoped_session
+from ooi_status.model.status_model import Base
 
 
 class StatusJsonEncoder(JSONEncoder):
@@ -26,12 +29,12 @@ else:
 app = Flask(__name__)
 Compress(app)
 app.json_encoder = StatusJsonEncoder
-app.config['SQLALCHEMY_ECHO'] = True
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql+psycopg2://monitor:monitor@localhost'
-db = SQLAlchemy(app)
+app.engine = create_engine('postgresql+psycopg2://monitor:monitor@localhost')
+app.sessionmaker = sessionmaker(bind=app.engine)
+app.session = scoped_session(app.sessionmaker)
+Base.query = app.session.query_property()
 
 if using_gevent:
-    db.engine.pool._use_threadlocal = True
+    app.engine.pool._use_threadlocal = True
 
 import ooi_status.api.views

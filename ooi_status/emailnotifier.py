@@ -19,14 +19,15 @@ class EmailNotifier(object):
         html = self.apply_template(status_dict, html_template, 'html')
         text = self.apply_template(status_dict, plaintext_template, 'plain')
 
-        message = MIMEMultipart('alternative')
-        message['Subject'] = subject
-        message['From'] = sender
-        message['To'] = ', '.join(receivers)
-        message.attach(text)
-        message.attach(html)
+        for receiver in receivers:
+            message = MIMEMultipart('alternative')
+            message['Subject'] = subject
+            message['From'] = sender
+            message['To'] = receiver
+            message.attach(text)
+            message.attach(html)
 
-        self.conn.sendmail(sender, receivers, message.as_string())
+            self.conn.sendmail(sender, [receiver], message.as_string())
 
     def apply_template(self, status_dict, template, mimetype):
         text = self.env.get_template(template).render(status_dict=status_dict, base_url=base_url)
