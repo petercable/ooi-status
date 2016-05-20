@@ -6,7 +6,7 @@ from werkzeug.exceptions import abort
 
 from ooi_status.api import app
 from ooi_status.model.status_model import ExpectedStream, DeployedStream
-from ooi_status.queries import (get_status_by_instrument, get_status_by_stream, get_status_by_stream_id, resample)
+from ooi_status.queries import (get_status_by_instrument, get_status_by_stream, get_status_by_stream_id, resample_stream_count)
 
 
 @app.teardown_appcontext
@@ -179,6 +179,6 @@ def run_resample():
     for deployed_stream in DeployedStream.query:
         app.logger.error('Resampling %s', deployed_stream)
         # resample all count data from now-48 to now-24 to 1 hour
-        resample(app.session, deployed_stream.id, fourty_eight_ago, twenty_four_ago, 3600)
+        resample_stream_count(app.session, deployed_stream.id, fourty_eight_ago, twenty_four_ago, 3600)
         app.session.commit()
     return 'DONE'

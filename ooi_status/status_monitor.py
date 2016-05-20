@@ -13,8 +13,8 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.sql.elements import and_
 
 from get_logger import get_logger
-from ooi_status.model.status_model import DeployedStream, ExpectedStream, StreamCount
-from ooi_status.queries import resample, get_status_for_notification
+from ooi_status.model.status_model import DeployedStream, ExpectedStream, StreamCount, ReferenceDesignator
+from ooi_status.queries import resample_stream_count, get_status_for_notification, resample_port_count
 from stop_watch import stopwatch
 
 log = get_logger(__name__, logging.INFO)
@@ -33,6 +33,17 @@ class BaseStatusMonitor(object):
     def gather_all(self):
         raise NotImplemented
 
+    def _get_or_create_refdes(self, reference_designator):
+        if reference_designator not in self._refdes_cache:
+            refdes = self.session.query(ReferenceDesignator).filter(
+                ReferenceDesignator.name == reference_designator).first()
+            if refdes is None:
+                refdes = ReferenceDesignator(name=reference_designator)
+                self.session.add(refdes)
+                self.session.flush()
+            self._refdes_cache[reference_designator] = refdes
+        return self._refdes_cache[reference_designator]
+
     def _get_or_create_expected(self, stream, method):
         if (stream, method) not in self._expected_cache:
             expected = self.session.query(ExpectedStream).filter(
@@ -45,13 +56,14 @@ class BaseStatusMonitor(object):
         return self._expected_cache[(stream, method)]
 
     def _get_or_create_stream(self, refdes, stream, method, count, timestamp, coll_time):
+        refdes_obj = self._get_or_create_refdes(refdes)
         expected_obj = self._get_or_create_expected(stream, method)
         if (refdes, expected_obj) not in self._deployed_cache:
             deployed = self.session.query(DeployedStream).filter(
-                and_(DeployedStream.reference_designator == refdes,
+                and_(DeployedStream.reference_designator == refdes_obj,
                      DeployedStream.expected_stream == expected_obj)).first()
             if deployed is None:
-                deployed = DeployedStream(reference_designator=refdes, expected_stream=expected_obj,
+                deployed = DeployedStream(reference_designator=refdes_obj, expected_stream=expected_obj,
                                           particle_count=count, last_seen=timestamp, collected=coll_time)
                 self.session.add(deployed)
                 self.session.flush()
@@ -109,7 +121,12 @@ class BaseStatusMonitor(object):
             log.info('Resampling %s', deployed_stream)
             # resample all count data from now-48 to now-24 to 1 hour
             with session.begin():
-                resample(session, deployed_stream.id, fourty_eight_ago, twenty_four_ago, 3600)
+                resample_stream_count(session, deployed_stream.id, fourty_eight_ago, twenty_four_ago, 3600)
+
+        for reference_designator in self.session.query(ReferenceDesignator):
+            log.info('Resampling %s', reference_designator)
+            with session.begin():
+                resample_port_count(session, reference_designator.id, fourty_eight_ago, twenty_four_ago, 3600)
 
     def check_for_notify(self):
         session = self.session_factory()
