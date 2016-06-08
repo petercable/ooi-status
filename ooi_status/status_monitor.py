@@ -165,11 +165,11 @@ class BaseStatusMonitor(object):
         root_url = self.config.get('URL_ROOT')
         www_root = self.config.get('WWW_ROOT')
         date = datetime.date.today()
-        notifier = self.get_email_notifier()
         notify_list = self.get_notify_list(session, 'digest')
 
         with session.begin():
             create_daily_digest_plots(session, www_root=www_root)
+            notifier = self.get_email_notifier()
             for site in get_unique_sites(session):
                 html = create_daily_digest_html(session, site=site, root_url=root_url)
                 notify_subject = subject_format % (site, date)
