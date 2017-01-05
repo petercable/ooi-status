@@ -17,7 +17,6 @@ from .model.status_model import (ExpectedStream, DeployedStream, StreamCount,
                                  StreamCondition, PortCount, ReferenceDesignator)
 
 
-
 RATE_ACCEPTABLE_DEVIATION = 0.3
 RIGHT = '&rarr;'
 UP = '&uarr;'

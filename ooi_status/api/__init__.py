@@ -39,8 +39,13 @@ posthost = app.config['POSTHOST']
 app.engine = create_engine('postgresql+psycopg2://{user}:{password}@{posthost}'.format(user=user,
                                                                                        password=password,
                                                                                        posthost=posthost))
+app.metadata_engine = create_engine('postgresql+psycopg2://awips@localhost/metadata', echo=True)
+
 app.sessionmaker = sessionmaker(bind=app.engine)
 app.session = scoped_session(app.sessionmaker)
+app.metadata_sessionmaker = sessionmaker(bind=app.metadata_engine)
+app.metadata_session = scoped_session(app.metadata_sessionmaker)
+
 Base.query = app.session.query_property()
 
 if using_gevent:

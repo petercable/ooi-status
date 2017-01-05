@@ -19,6 +19,7 @@ from sqlalchemy.sql.elements import and_
 
 from ooi_status.amqp_client import AmqpStatsClient
 from ooi_status.emailnotifier import EmailNotifier
+from ooi_status.metadata_queries import get_all_streams
 from .get_logger import get_logger
 from .model.status_model import (DeployedStream, ExpectedStream, StreamCount,
                                  ReferenceDesignator, NotifyAddress, create_database)
@@ -184,22 +185,14 @@ class BaseStatusMonitor(object):
 
 
 class PostgresStatusMonitor(BaseStatusMonitor):
-    ntp_epoch_offset = (datetime.datetime(1970, 1, 1) - datetime.datetime(1900, 1, 1)).total_seconds()
-
     def __init__(self, engine, metadata_engine):
         super(PostgresStatusMonitor, self).__init__(engine)
         self.metadata_engine = metadata_engine
+        self.metadata_session_factory = sessionmaker(bind=metadata_engine, autocommit=True)
+        self.metadata_session = self.metadata_session_factory()
 
     def gather_all(self):
-        self._create_counts(self._query_postgres())
-
-    def _query_postgres(self):
-        stmt = 'select subsite, node, sensor, method, stream, count, last from stream_metadata'
-        for row in self.metadata_engine.execute(stmt):
-            subsite, node, sensor, method, stream, particle_count, last_seen_ntp = row
-            reference_designator = '-'.join((subsite, node, sensor))
-            last_seen = datetime.datetime.utcfromtimestamp(last_seen_ntp - self.ntp_epoch_offset)
-            yield reference_designator, method, stream, particle_count, last_seen
+        self._create_counts(get_all_streams(self.metadata_session))
 
 
 class UframeStatusMonitor(BaseStatusMonitor):

@@ -3,7 +3,9 @@ import six.moves.http_client as http_client
 from flask import jsonify, request, send_file
 from sqlalchemy import and_
 from werkzeug.exceptions import abort
+from dateutil.parser import parse
 
+from ooi_status.metadata_queries import find_instrument_availability
 from ..api import app
 from ..model.status_model import ExpectedStream, DeployedStream, NotifyAddress
 from ..queries import (get_status_by_instrument, get_status_by_stream,
@@ -15,6 +17,22 @@ from ..queries import (get_status_by_instrument, get_status_by_stream,
 @app.teardown_appcontext
 def shutdown_session(exception=None):
     app.session.remove()
+    app.metadata_session.remove()
+
+
+@app.route('/available/<refdes>')
+def available(refdes):
+    filter_method = request.args.get('method')
+    filter_stream = request.args.get('stream')
+    start_time = request.args.get('start_time')
+    stop_time = request.args.get('stop_time')
+
+    if start_time is not None:
+        start_time = parse(start_time)
+    if stop_time is not None:
+        stop_time = parse(stop_time)
+    return jsonify({'availability': find_instrument_availability(
+        app.metadata_session, refdes, filter_method, filter_stream, lower_bound=start_time, upper_bound=stop_time)})
 
 
 @app.route('/expected')
@@ -241,3 +259,5 @@ def get_weekly_digest():
 @app.route('/weeklydigest/<site>')
 def get_weekly_digest_site(site):
     return create_weekly_digest_html(app.session, site=site)
+
+

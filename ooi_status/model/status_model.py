@@ -6,8 +6,7 @@ Track the CI particles being ingested into cassandra and store information into 
 from sqlalchemy import Column, Integer, String, Float, ForeignKey, DateTime, UniqueConstraint
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
-
-Base = declarative_base()
+from .base import Base
 
 
 class ReferenceDesignator(Base):
