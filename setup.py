@@ -12,7 +12,6 @@ setup(
                       'gevent>=1.1',
                       'alembic>=0.8.5',
                       'APScheduler>=3.0',
-                      'cassandra-driver>=3.1',
                       'Flask-Compress>=1.3',
                       'futures>=3.0',
                       'pandas>=0.18',

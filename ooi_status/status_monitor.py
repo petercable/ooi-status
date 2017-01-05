@@ -11,7 +11,6 @@ import datetime
 import pandas as pd
 
 from apscheduler.schedulers.blocking import BlockingScheduler
-from cassandra.cluster import Cluster
 from dateutil.parser import parse
 from flask import Config
 from sqlalchemy import create_engine
@@ -184,19 +183,19 @@ class BaseStatusMonitor(object):
         return EmailNotifier(smtp_host, from_addr, root_url, smtp_user, smtp_passwd)
 
 
-class CassStatusMonitor(BaseStatusMonitor):
+class PostgresStatusMonitor(BaseStatusMonitor):
     ntp_epoch_offset = (datetime.datetime(1970, 1, 1) - datetime.datetime(1900, 1, 1)).total_seconds()
 
-    def __init__(self, engine, cassandra_session):
-        super(CassStatusMonitor, self).__init__(engine)
-        self.cassandra = cassandra_session
+    def __init__(self, engine, metadata_engine):
+        super(PostgresStatusMonitor, self).__init__(engine)
+        self.metadata_engine = metadata_engine
 
     def gather_all(self):
-        self._create_counts(self._query_cassandra())
+        self._create_counts(self._query_postgres())
 
-    def _query_cassandra(self):
+    def _query_postgres(self):
         stmt = 'select subsite, node, sensor, method, stream, count, last from stream_metadata'
-        for row in self.cassandra.execute(stmt):
+        for row in self.metadata_engine.execute(stmt):
             subsite, node, sensor, method, stream, particle_count, last_seen_ntp = row
             reference_designator = '-'.join((subsite, node, sensor))
             last_seen = datetime.datetime.utcfromtimestamp(last_seen_ntp - self.ntp_epoch_offset)
@@ -235,24 +234,16 @@ class UframeStatusMonitor(BaseStatusMonitor):
 
 @click.command()
 @click.option('--posthost', default='localhost', help='hostname for Postgres database')
-@click.option('--casshost', help='hostname for the cassandra database')
 @click.option('--uframehost', help='hostname for the uframe API')
-def main(casshost, posthost, uframehost):
+def main(posthost, uframehost):
     engine = create_engine('postgresql+psycopg2://monitor:monitor@{posthost}'.format(posthost=posthost))
     create_database(engine)
 
-    if not any((casshost, uframehost)):
-        raise Exception('You must supply either a cassandra node or a uframe host')
-
-    if all((casshost, uframehost)):
-        raise Exception('You must supply only ONE cassandra node or uframe host')
-
-    if casshost is not None:
-        cluster = Cluster([casshost])
-        cassandra = cluster.connect('ooi')
-        monitor = CassStatusMonitor(engine, cassandra)
-    else:
+    if uframehost is not None:
         monitor = UframeStatusMonitor(engine, uframehost)
+    else:
+        metadata_engine = create_engine('postgresql+psycopg2://awips@{posthost}/metadata'.format(posthost=posthost))
+        monitor = PostgresStatusMonitor(engine, metadata_engine)
 
     monitor.config.from_object('ooi_status.default_settings')
     if 'OOISTATUS_SETTINGS' in os.environ:

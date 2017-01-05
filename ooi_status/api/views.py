@@ -1,3 +1,4 @@
+import datetime
 import six.moves.http_client as http_client
 from flask import jsonify, request, send_file
 from sqlalchemy import and_
@@ -112,7 +113,16 @@ def get_stream(deployed_id):
 
 @app.route('/stream/<int:deployed_id>/plot')
 def get_plot(deployed_id):
-    title, buf = plot_stream_rates_buf(app.session, deployed_id)
+    days = request.args.get('days', 1)
+    try:
+        days = float(days)
+    except ValueError:
+        days = 1
+    now = datetime.datetime.utcnow()
+    start = now - datetime.timedelta(days=days)
+    end = now
+
+    title, buf = plot_stream_rates_buf(app.session, deployed_id, start, end)
     return send_file(buf, attachment_filename='%s.png' % title, mimetype='image/png')
 
 
@@ -134,7 +144,16 @@ def get_instrument(refdes_id):
 
 @app.route('/instrument/<int:refdes_id>/plot')
 def plot_instrument_rate(refdes_id):
-    title, buf = plot_port_rates_buf(app.session, refdes_id)
+    days = request.args.get('days', 1)
+    try:
+        days = float(days)
+    except ValueError:
+        days = 1
+    now = datetime.datetime.utcnow()
+    start = now - datetime.timedelta(days=days)
+    end = now
+
+    title, buf = plot_port_rates_buf(app.session, refdes_id, start, end)
     return send_file(buf, attachment_filename='%s.png' % title, mimetype='image/png')
 
 
