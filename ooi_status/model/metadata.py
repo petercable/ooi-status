@@ -3,12 +3,12 @@ from sqlalchemy import (BigInteger, Column, Integer, String,
                         UniqueConstraint, DateTime, ForeignKey, Sequence)
 from sqlalchemy.orm import relationship
 
-from .base import Base, NtpSecsTimestamp
+from .base import MetadataBase, NtpSecsTimestamp
 
-metadata = Base.metadata
+metadata = MetadataBase.metadata
 
 
-class PartitionMetadata(Base):
+class PartitionMetadata(MetadataBase):
     __tablename__ = 'partition_metadata'
     __table_args__ = (
         UniqueConstraint('subsite', 'node', 'sensor', 'method', 'stream', 'bin', 'store'),
@@ -32,7 +32,7 @@ class PartitionMetadata(Base):
                     'store': self.store, 'stream': self.stream, 'modified': self.modified})
 
 
-class StreamMetadata(Base):
+class StreamMetadata(MetadataBase):
     __tablename__ = 'stream_metadata'
     __table_args__ = (
         UniqueConstraint('subsite', 'node', 'sensor', 'method', 'stream'),
@@ -58,7 +58,7 @@ class StreamMetadata(Base):
                     'stream': self.stream})
 
 
-class ProcessedMetadata(Base):
+class ProcessedMetadata(MetadataBase):
     __tablename__ = 'processed_metadata'
     __table_args__ = (
         UniqueConstraint('processor_name', 'partition_id'),

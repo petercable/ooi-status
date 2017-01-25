@@ -5,7 +5,7 @@ from logging.config import fileConfig
 
 import sys
 sys.path.append('.')
-from ooi_status.model.status_model import Base
+from ooi_status.model import MonitorBase
 
 
 # this is the Alembic Config object, which provides
@@ -20,7 +20,7 @@ fileConfig(config.config_file_name)
 # for 'autogenerate' support
 # from myapp import mymodel
 # target_metadata = mymodel.Base.metadata
-target_metadata = Base.metadata
+target_metadata = MonitorBase.metadata
 
 # other values from the config, defined by the needs of env.py,
 # can be acquired:

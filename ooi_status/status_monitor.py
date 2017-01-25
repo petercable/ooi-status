@@ -3,15 +3,13 @@ RSN health and status monitor for data particles received by OOI CI.
 
 @author Dan Mergens
 """
-import os
-import click
-import logging
-import requests
 import datetime
-import pandas as pd
+import logging
+import os
 
+import click
+import pandas as pd
 from apscheduler.schedulers.blocking import BlockingScheduler
-from dateutil.parser import parse
 from flask import Config
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -19,10 +17,9 @@ from sqlalchemy.sql.elements import and_
 
 from ooi_status.amqp_client import AmqpStatsClient
 from ooi_status.emailnotifier import EmailNotifier
-from ooi_status.metadata_queries import get_all_streams
+from ooi_status.metadata_queries import get_active_streams
 from .get_logger import get_logger
-from .model.status_model import (DeployedStream, ExpectedStream, StreamCount,
-                                 ReferenceDesignator, NotifyAddress, create_database)
+from .model.status_model import (DeployedStream, ExpectedStream, ReferenceDesignator, NotifyAddress, create_database)
 from .queries import (resample_stream_count, get_status_for_notification, resample_port_count,
                       create_daily_digest_plots, create_daily_digest_html, get_unique_sites,
                       get_stream_rates_dataframe, get_port_rates_dataframe, check_should_notify)
@@ -43,28 +40,18 @@ class BaseStatusMonitor(object):
         self._deployed_cache = {}
         self.config = Config(here)
 
-    def gather_all(self):
+    def check_all(self):
         raise NotImplemented
 
     def _get_or_create_refdes(self, reference_designator):
         if reference_designator not in self._refdes_cache:
-            refdes = self.session.query(ReferenceDesignator).filter(
-                ReferenceDesignator.name == reference_designator).first()
-            if refdes is None:
-                refdes = ReferenceDesignator(name=reference_designator)
-                self.session.add(refdes)
-                self.session.flush()
+            refdes = ReferenceDesignator.get_or_create(self.session, reference_designator)
             self._refdes_cache[reference_designator] = refdes
         return self._refdes_cache[reference_designator]
 
     def _get_or_create_expected(self, stream, method):
         if (stream, method) not in self._expected_cache:
-            expected = self.session.query(ExpectedStream).filter(
-                and_(ExpectedStream.name == stream, ExpectedStream.method == method)).first()
-            if expected is None:
-                expected = ExpectedStream(name=stream, method=method)
-                self.session.add(expected)
-                self.session.flush()
+            expected = ExpectedStream.get_or_create(self.session, stream, method)
             self._expected_cache[(stream, method)] = expected
         return self._expected_cache[(stream, method)]
 
@@ -72,14 +59,7 @@ class BaseStatusMonitor(object):
         refdes_obj = self._get_or_create_refdes(refdes)
         expected_obj = self._get_or_create_expected(stream, method)
         if (refdes, expected_obj) not in self._deployed_cache:
-            deployed = self.session.query(DeployedStream).filter(
-                and_(DeployedStream.reference_designator == refdes_obj,
-                     DeployedStream.expected_stream == expected_obj)).first()
-            if deployed is None:
-                deployed = DeployedStream(reference_designator=refdes_obj, expected_stream=expected_obj,
-                                          particle_count=count, last_seen=timestamp, collected=coll_time)
-                self.session.add(deployed)
-                self.session.flush()
+            deployed = DeployedStream.get_or_create(self.session, refdes_obj, expected_obj, count, timestamp, coll_time)
             self._deployed_cache[(refdes, expected_obj)] = deployed
         return self._deployed_cache[(refdes, expected_obj)]
 
@@ -100,26 +80,23 @@ class BaseStatusMonitor(object):
                 self.session.add(es)
 
     @stopwatch()
-    def _create_counts(self, rows):
+    def _check_status(self, rows):
         now = datetime.datetime.utcnow()
         with self.session.begin():
-            for row in rows:
-                log.debug('processing %s', row)
-                reference_designator, method, stream, count, last_seen = row
-                if method == 'streamed':
-                    self._create_count(reference_designator, stream, method, count, last_seen, now)
+            for stream_metadata, elapsed, uid in rows:
+                deployed = self._get_or_create_stream(stream_metadata.refdes, stream_metadata.stream,
+                                                      stream_metadata.method, stream_metadata.count,
+                                                      stream_metadata.last, now)
 
-    def _create_count(self, reference_designator, stream, method, particle_count, timestamp, now):
-        deployed = self._get_or_create_stream(reference_designator, stream, method, particle_count, timestamp, now)
-        if deployed.collected != now:
-            count_diff = particle_count - deployed.particle_count
-            time_diff = (now - deployed.collected).total_seconds()
-            deployed.particle_count = particle_count
-            deployed.last_seen = timestamp
-            deployed.collected = now
-            particle_count = StreamCount(stream_id=deployed.id, collected_time=now,
-                                         particle_count=count_diff, seconds=time_diff)
-            self.session.add(particle_count)
+                elapsed_secs = elapsed.total_seconds()
+
+                log.info('processing %s %s %s %s %s %s',
+                         stream_metadata.refdes,
+                         stream_metadata.method,
+                         stream_metadata.stream,
+                         elapsed,
+                         uid,
+                         deployed.get_status(elapsed_secs))
 
     def resample_count_data_hourly(self):
         window_start = self.config.get('RESAMPLE_WINDOW_START_HOURS')
@@ -147,17 +124,6 @@ class BaseStatusMonitor(object):
     def get_notify_list(session, email_type):
         query = session.query(NotifyAddress).filter(NotifyAddress.email_type == email_type)
         return [na.email_addr for na in query]
-
-    def check_for_notify(self):
-        session = self.session_factory()
-        with session.begin():
-            status_dict = get_status_for_notification(session)
-            if check_should_notify(status_dict):
-
-                notify_subject = self.config.get('NOTIFY_SUBJECT')
-                notify_list = self.get_notify_list(session, 'notify')
-                notifier = self.get_email_notifier()
-                notifier.send_status(notify_list, notify_subject, status_dict)
 
     def daily_digest(self):
         session = self.session_factory()
@@ -191,52 +157,17 @@ class PostgresStatusMonitor(BaseStatusMonitor):
         self.metadata_session_factory = sessionmaker(bind=metadata_engine, autocommit=True)
         self.metadata_session = self.metadata_session_factory()
 
-    def gather_all(self):
-        self._create_counts(get_all_streams(self.metadata_session))
-
-
-class UframeStatusMonitor(BaseStatusMonitor):
-    EDEX_BASE_URL = 'http://%s:%d/sensor/inv/toc'
-
-    def __init__(self, engine, uframe_host, uframe_port=12576):
-        super(UframeStatusMonitor, self).__init__(engine)
-        self.uframe_host = uframe_host
-        self.uframe_port = uframe_port
-
-    def gather_all(self):
-        self._create_counts(self._query_api())
-
-    def _query_api(self):
-        # get the latest metadata from uframe
-        url = self.EDEX_BASE_URL % (self.uframe_host, self.uframe_port)
-        response = requests.get(url)
-        if response.status_code is not 200:
-            log.error('failed to get a valid JSON response')
-
-        # find the matching stream name and method in the return
-        for inst_dict in response.json():
-            reference_designator = inst_dict.get('reference_designator')
-            for stream_dict in inst_dict.get('streams'):
-                stream = stream_dict.get('stream')
-                method = stream_dict.get('method')
-                particle_count = stream_dict.get('count')
-                last_seen = parse(stream_dict.get('endTime')).replace(tzinfo=None)
-                if all((stream, method, particle_count, last_seen)):
-                    yield reference_designator, method, stream, particle_count, last_seen
+    def check_all(self):
+        self._check_status(get_active_streams(self.metadata_session))
 
 
 @click.command()
-@click.option('--posthost', default='localhost', help='hostname for Postgres database')
-@click.option('--uframehost', help='hostname for the uframe API')
-def main(posthost, uframehost):
-    engine = create_engine('postgresql+psycopg2://monitor:monitor@{posthost}'.format(posthost=posthost))
+def main():
+    engine = create_engine('postgresql+psycopg2://monitor@/monitor')
     create_database(engine)
 
-    if uframehost is not None:
-        monitor = UframeStatusMonitor(engine, uframehost)
-    else:
-        metadata_engine = create_engine('postgresql+psycopg2://awips@{posthost}/metadata'.format(posthost=posthost))
-        monitor = PostgresStatusMonitor(engine, metadata_engine)
+    metadata_engine = create_engine('postgresql+psycopg2://awips@/metadata')
+    monitor = PostgresStatusMonitor(engine, metadata_engine)
 
     monitor.config.from_object('ooi_status.default_settings')
     if 'OOISTATUS_SETTINGS' in os.environ:
@@ -254,14 +185,9 @@ def main(posthost, uframehost):
 
     scheduler = BlockingScheduler()
     log.info('adding jobs')
-    # gather data every minute
-    scheduler.add_job(monitor.gather_all, 'cron', second=0)
-    # resample data every hour
-    scheduler.add_job(monitor.resample_count_data_hourly, 'cron', minute=0)
-    # notify on change every 5 minutes
-    scheduler.add_job(monitor.check_for_notify, 'cron', minute='*/5')
-    # daily digest
-    scheduler.add_job(monitor.daily_digest, 'cron', hour=0)
+
+    # notify on change every minute
+    scheduler.add_job(monitor.check_all, 'cron', second=0)
     log.info('starting jobs')
     scheduler.start()
 

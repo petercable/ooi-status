@@ -1,31 +1,16 @@
 # coding: utf-8
-# from geoalchemy2 import Geometry
-from datetime import datetime
+
+from geoalchemy2 import Geometry
 from sqlalchemy import (BigInteger, Boolean, Column, DateTime, Float, ForeignKey, Integer,
                         LargeBinary, String, Table, Text, UniqueConstraint)
-from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.orm import relationship
-from sqlalchemy.sql.sqltypes import NullType
 
-from .base import Base, UnixMillisTimestamp
+from .base import MetadataBase, UnixMillisTimestamp
 
-metadata = Base.metadata
-
-
-class Ingestinfo(Base):
-    __tablename__ = 'ingestinfo'
-
-    id = Column(Integer, primary_key=True)
-    ingestmask = Column(String(255))
-    ingestmethod = Column(String(32))
-    ingestpath = Column(String(255))
-    ingestqueue = Column(String(255))
-    eventid = Column(ForeignKey(u'xdeployment.eventid'))
-
-    xdeployment = relationship(u'Xdeployment')
+metadata = MetadataBase.metadata
 
 
-class Xasset(Base):
+class Xasset(MetadataBase):
     __tablename__ = 'xasset'
 
     assetid = Column(Integer, primary_key=True)
@@ -42,7 +27,7 @@ class Xasset(Base):
     institutionpurchaseordernumber = Column(String(128))
     depth = Column(Float(53))
     latitude = Column(Float(53))
-    location = Column(NullType)
+    location = Column(Geometry)
     longitude = Column(Float(53))
     orbitradius = Column(Float(53))
     manufacturer = Column(String(128))
@@ -65,18 +50,28 @@ class Xasset(Base):
     shelflifeexpirationdate = Column(BigInteger)
     softwareversion = Column(String(128))
     uid = Column(String(128), unique=True)
-
     remoteresources = relationship(u'Xremoteresource', secondary='xasset_xremoteresource')
-    # instrument = relationship(u'Xdeployment', secondary='xinstrument', foreign_keys=['Xasset.assetid'])
     events = relationship(u'Xevent', secondary='xasset_xevents')
-    # node = relationship(u'Xdeployment', secondary='xnode')
-    # mooring = relationship(u'Xdeployment', secondary='xmooring')
 
 
 class Xarray(Xasset):
     __tablename__ = 'xarray'
-
     assetid = Column(ForeignKey(u'xasset.assetid'), primary_key=True)
+
+
+class Xinstrument(Xasset):
+    __tablename__ = 'xinstrument'
+    assetid = Column('assetid', ForeignKey(u'xasset.assetid'), primary_key=True)
+
+
+class Xmooring(Xasset):
+    __tablename__ = 'xmooring'
+    assetid = Column('assetid', ForeignKey(u'xasset.assetid'), primary_key=True)
+
+
+class Xnode(Xasset):
+    __tablename__ = 'xnode'
+    assetid = Column('assetid', ForeignKey(u'xasset.assetid'), primary_key=True)
 
 
 t_xasset_xevents = Table(
@@ -93,17 +88,16 @@ t_xasset_xremoteresource = Table(
 )
 
 
-class Xcalibration(Base):
+class Xcalibration(MetadataBase):
     __tablename__ = 'xcalibration'
 
     calid = Column(Integer, primary_key=True)
     name = Column(String(255))
     assetid = Column(ForeignKey(u'xinstrument.assetid'))
-
     xinstrument = relationship(u'Xinstrument')
 
 
-class Xevent(Base):
+class Xevent(MetadataBase):
     __tablename__ = 'xevent'
 
     eventid = Column(Integer, primary_key=True)
@@ -157,7 +151,7 @@ class Xlocationevent(Xevent):
 
     depth = Column(Float(53))
     latitude = Column(Float(53))
-    location = Column(NullType)
+    location = Column(Geometry)
     longitude = Column(Float(53))
     orbitradius = Column(Float(53))
     eventid = Column(ForeignKey(u'xevent.eventid'), primary_key=True)
@@ -233,7 +227,7 @@ class Xdeployment(Xevent):
     inductiveid = Column(Integer)
     depth = Column(Float(53))
     latitude = Column(Float(53))
-    # location = Column(NullType)
+    location = Column(Geometry)
     longitude = Column(Float(53))
     orbitradius = Column(Float(53))
     recoveredby = Column(String(128))
@@ -248,33 +242,14 @@ class Xdeployment(Xevent):
     recovercruiseid = Column(ForeignKey(u'xcruiseinfo.eventid'))
     sassetid = Column(ForeignKey(u'xinstrument.assetid'))
 
-    xcruiseinfo = relationship(u'Xcruiseinfo', primaryjoin='Xdeployment.deploycruiseid == Xcruiseinfo.eventid')
-    xmooring = relationship(u'Xmooring', primaryjoin='Xdeployment.massetid == Xmooring.assetid')
-    xnode = relationship(u'Xnode', primaryjoin='Xdeployment.nassetid == Xnode.assetid')
-    xcruiseinfo1 = relationship(u'Xcruiseinfo', primaryjoin='Xdeployment.recovercruiseid == Xcruiseinfo.eventid')
-    xinstrument = relationship(u'Xinstrument', primaryjoin='Xdeployment.sassetid == Xinstrument.assetid')
+    deployment_cruise = relationship(u'Xcruiseinfo', primaryjoin='Xdeployment.deploycruiseid == Xcruiseinfo.eventid')
+    recovery_cruise = relationship(u'Xcruiseinfo', primaryjoin='Xdeployment.recovercruiseid == Xcruiseinfo.eventid')
+    mooring_asset = relationship(u'Xmooring', primaryjoin='Xdeployment.massetid == Xmooring.assetid')
+    node_asset = relationship(u'Xnode', primaryjoin='Xdeployment.nassetid == Xnode.assetid')
+    instrument_asset = relationship(u'Xinstrument', primaryjoin='Xdeployment.sassetid == Xinstrument.assetid')
 
 
-class Xinstrument(Base):
-    __tablename__ = 'xinstrument'
-    assetid = Column('assetid', ForeignKey(u'xasset.assetid'), primary_key=True)
-    eventid = Column('eventid', ForeignKey(u'xdeployment.eventid'))
-    asset = relationship(Xasset)
-
-
-class Xmooring(Base):
-    __tablename__ = 'xmooring'
-    assetid = Column('assetid', ForeignKey(u'xasset.assetid'), primary_key=True)
-    eventid = Column('eventid', ForeignKey(u'xdeployment.eventid'))
-
-
-class Xnode(Base):
-    __tablename__ = 'xnode'
-    assetid = Column('assetid', ForeignKey(u'xasset.assetid'), primary_key=True)
-    eventid = Column('eventid', ForeignKey(u'xdeployment.eventid'))
-
-
-class Xremoteresource(Base):
+class Xremoteresource(MetadataBase):
     __tablename__ = 'xremoteresource'
 
     remoteresourceid = Column(Integer, primary_key=True)

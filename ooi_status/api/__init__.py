@@ -4,7 +4,7 @@ from flask.json import JSONEncoder
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, scoped_session
 
-from ..model.status_model import Base
+from ooi_status.model import MonitorBase, MetadataBase
 
 
 class StatusJsonEncoder(JSONEncoder):
@@ -46,7 +46,8 @@ app.session = scoped_session(app.sessionmaker)
 app.metadata_sessionmaker = sessionmaker(bind=app.metadata_engine)
 app.metadata_session = scoped_session(app.metadata_sessionmaker)
 
-Base.query = app.session.query_property()
+MetadataBase.query = app.session.query_property()
+MonitorBase.query = app.session.query_property()
 
 if using_gevent:
     app.engine.pool._use_threadlocal = True

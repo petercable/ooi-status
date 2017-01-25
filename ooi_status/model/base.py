@@ -5,7 +5,8 @@ from sqlalchemy import FLOAT
 from sqlalchemy import TypeDecorator
 from sqlalchemy.ext.declarative import declarative_base
 
-Base = declarative_base()
+MetadataBase = declarative_base()
+MonitorBase = declarative_base()
 
 
 class UnixMillisTimestamp(TypeDecorator):

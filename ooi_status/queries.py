@@ -1,21 +1,20 @@
-import os
 import io
-import six
-import jinja2
 import logging
-import pandas as pd
-import matplotlib.pyplot as plt
-
+import os
 from collections import Counter, OrderedDict
 from datetime import timedelta, datetime
+
+import jinja2
+import matplotlib.pyplot as plt
+import pandas as pd
+import six
 from sqlalchemy import func
 from sqlalchemy.sql.elements import and_
 
-from .emailnotifier import EmailNotifier
+from ooi_status.metadata_queries import get_all_streams
 from .get_logger import get_logger
 from .model.status_model import (ExpectedStream, DeployedStream, StreamCount,
                                  StreamCondition, PortCount, ReferenceDesignator)
-
 
 RATE_ACCEPTABLE_DEVIATION = 0.3
 RIGHT = '&rarr;'
@@ -324,9 +323,14 @@ def get_status_by_stream_id(session, deployed_id, include_rates=True):
         return d
 
 
-def get_status_for_notification(session):
+def get_status_for_notification(monitor_session, metadata_session):
     base_time = get_base_time()
-    query = get_status_query(session, base_time, windows=[{'minutes': 5}, {'days': 1}])
+    for refdes, method, stream, count, stop in get_all_streams(metadata_session):
+        deployed = ''
+
+
+
+    query = get_status_query(monitor_session, base_time, windows=[{'minutes': 5}, {'days': 1}])
     status_dict = {}
     for row in query:
         deployed_stream, collected_time, five_min_time, five_min_count, one_day_time, one_day_count = row
@@ -345,7 +349,7 @@ def get_status_for_notification(session):
         if condition is None:
             now = datetime.utcnow()
             condition = StreamCondition(deployed_stream=deployed_stream, last_status=status, last_status_time=now)
-            session.add(condition)
+            monitor_session.add(condition)
 
         if condition.last_status != status:
             d = {

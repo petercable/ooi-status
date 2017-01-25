@@ -4,12 +4,11 @@ Track the CI particles being ingested into cassandra and store information into 
 @author Dan Mergens
 """
 from sqlalchemy import Column, Integer, String, Float, ForeignKey, DateTime, UniqueConstraint
-from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
-from .base import Base
+from .base import MonitorBase
 
 
-class ReferenceDesignator(Base):
+class ReferenceDesignator(MonitorBase):
     __tablename__ = 'reference_designator'
     __table_args__ = (
         UniqueConstraint('name'),
@@ -20,8 +19,18 @@ class ReferenceDesignator(Base):
     def __repr__(self):
         return self.name
 
+    @staticmethod
+    def get_or_create(session, reference_designator):
+        object = session.query(ReferenceDesignator).filter(
+            ReferenceDesignator.name == reference_designator).first()
+        if object is None:
+            object = ReferenceDesignator(name=reference_designator)
+            session.add(object)
+            session.flush()
+        return object
 
-class ExpectedStream(Base):
+
+class ExpectedStream(MonitorBase):
     __tablename__ = 'expected_stream'
     __table_args__ = (
         UniqueConstraint('name', 'method'),
@@ -33,6 +42,16 @@ class ExpectedStream(Base):
     warn_interval = Column(Integer)
     fail_interval = Column(Integer)
 
+    @staticmethod
+    def get_or_create(session, stream, method):
+        expected = session.query(ExpectedStream).filter(ExpectedStream.name == stream,
+                                                        ExpectedStream.method == method).first()
+        if expected is None:
+            expected = ExpectedStream(name=stream, method=method)
+            session.add(expected)
+            session.flush()
+        return expected
+
     def asdict(self):
         fields = ['id', 'name', 'method', 'expected_rate', 'warn_interval', 'fail_interval']
         return {field: getattr(self, field) for field in fields}
@@ -42,7 +61,7 @@ class ExpectedStream(Base):
                                                self.warn_interval, self.fail_interval)
 
 
-class DeployedStream(Base):
+class DeployedStream(MonitorBase):
     __tablename__ = 'deployed_stream'
     __table_args__ = (
         UniqueConstraint('reference_designator_id', 'expected_stream_id'),
@@ -53,12 +72,23 @@ class DeployedStream(Base):
     particle_count = Column(Integer, nullable=False)
     last_seen = Column(DateTime, nullable=False)
     collected = Column(DateTime, nullable=False)
-    expected_rate = Column(Float)
-    warn_interval = Column(Integer)
-    fail_interval = Column(Integer)
+    _expected_rate = Column('expected_rate', Float)
+    _warn_interval = Column('warn_interval', Integer)
+    _fail_interval = Column('fail_interval', Integer)
     reference_designator = relationship(ReferenceDesignator, backref='deployed_streams', lazy='joined')
     expected_stream = relationship(ExpectedStream, backref='deployed_streams', lazy='joined')
     stream_condition = relationship('StreamCondition', uselist=False, back_populates="deployed_stream")
+
+    @staticmethod
+    def get_or_create(session, refdes_obj, expected_obj, count, timestamp, coll_time):
+        deployed = session.query(DeployedStream).filter(DeployedStream.reference_designator == refdes_obj,
+                                                        DeployedStream.expected_stream == expected_obj).first()
+        if deployed is None:
+            deployed = DeployedStream(reference_designator=refdes_obj, expected_stream=expected_obj,
+                                      particle_count=count, last_seen=timestamp, collected=coll_time)
+            session.add(deployed)
+            session.flush()
+        return deployed
 
     def asdict(self):
         return {
@@ -66,44 +96,64 @@ class DeployedStream(Base):
             'reference_designator': self.reference_designator.name,
             'reference_designator_id': self.reference_designator.id,
             'expected_stream': self.expected_stream,
-            'expected_rate': self.expected_rate,
-            'warn_interval': self.warn_interval,
-            'fail_interval': self.fail_interval,
+            'expected_rate': self._expected_rate,
+            'warn_interval': self._warn_interval,
+            'fail_interval': self._fail_interval,
         }
 
     def __repr__(self):
         return '{0} {1} {2} {3}'.format(self.reference_designator, self.expected_stream,
                                         self.collected, self.particle_count)
 
-    def get_expected_rate(self):
-        return self.expected_stream.expected_rate if self.expected_rate is None else self.expected_rate
-
-    def get_warn_interval(self):
-        return self.expected_stream.warn_interval if self.warn_interval is None else self.warn_interval
-
-    def get_fail_interval(self):
-        return self.expected_stream.fail_interval if self.fail_interval is None else self.fail_interval
+    def get_status(self, elapsed_seconds):
+        if self.untracked:
+            return 'UNTRACKED'
+        if elapsed_seconds > self.fail_interval:
+            return 'FAIL %s' % self.fail_interval
+        if elapsed_seconds > self.warn_interval:
+            return 'WARN %s' % self.warn_interval
+        return 'PASS'
 
     @property
-    def disabled(self):
+    def expected_rate(self):
+        return self.expected_stream.expected_rate if self._expected_rate is None else self._expected_rate
+
+    @property
+    def warn_interval(self):
+        return self.expected_stream.warn_interval if self._warn_interval is None else self._warn_interval
+
+    @property
+    def fail_interval(self):
+        return self.expected_stream.fail_interval if self._fail_interval is None else self._fail_interval
+
+    @property
+    def untracked(self):
         return all((
             self.expected_rate == 0,
             self.warn_interval == 0,
             self.fail_interval == 0
         ))
 
+    @property
+    def disabled(self):
+        return all((
+            self._expected_rate == 0,
+            self._warn_interval == 0,
+            self._fail_interval == 0
+        ))
+
     def disable(self):
-        self.expected_rate = 0
-        self.warn_interval = 0
-        self.fail_interval = 0
+        self._expected_rate = 0
+        self._warn_interval = 0
+        self._fail_interval = 0
 
     def enable(self):
-        self.expected_rate = None
-        self.warn_interval = None
-        self.fail_interval = None
+        self._expected_rate = None
+        self._warn_interval = None
+        self._fail_interval = None
 
 
-class StreamCondition(Base):
+class StreamCondition(MonitorBase):
     __tablename__ = 'stream_condition'
     __table_args__ = (
         UniqueConstraint('stream_id'),
@@ -116,7 +166,7 @@ class StreamCondition(Base):
     deployed_stream = relationship('DeployedStream', back_populates='stream_condition')
 
 
-class StreamCount(Base):
+class StreamCount(MonitorBase):
     __tablename__ = 'stream_count'
     id = Column(Integer, primary_key=True)
     stream_id = Column(Integer, ForeignKey('deployed_stream.id'), nullable=False)
@@ -135,7 +185,7 @@ class StreamCount(Base):
         )
 
 
-class PortCount(Base):
+class PortCount(MonitorBase):
     __tablename__ = 'port_count'
     id = Column(Integer, primary_key=True)
     reference_designator_id = Column(Integer, ForeignKey('reference_designator.id'), nullable=False)
@@ -145,7 +195,7 @@ class PortCount(Base):
     reference_designator = relationship(ReferenceDesignator, backref='port_counts')
 
 
-class NotifyAddress(Base):
+class NotifyAddress(MonitorBase):
     __tablename__ = 'notify_address'
     __table_args__ = (
         UniqueConstraint('email_addr', 'email_type'),
@@ -160,5 +210,5 @@ class NotifyAddress(Base):
 
 def create_database(engine, drop=False):
     if drop:
-        Base.metadata.drop_all(bind=engine)
-    Base.metadata.create_all(bind=engine)
+        MonitorBase.metadata.drop_all(bind=engine)
+    MonitorBase.metadata.create_all(bind=engine)

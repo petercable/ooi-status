@@ -263,6 +263,31 @@ def get_all_streams(session):
         yield row.refdes, row.method, row.stream, row.count, row.stop
 
 
+def get_active_streams(session):
+    """
+    Return all streams which are within an active deployment
+    :param session: sqlalchemy session object
+    :return: (StreamMetadata, TimeDelta(since last particle), String(Asset UID))
+    """
+    now = datetime.datetime.utcnow()
+    for sm, assetid, uid in session.query(
+        model.StreamMetadata,
+        model.Xdeployment.sassetid,
+        model.Xasset.uid
+    ).filter(
+        model.StreamMetadata.subsite == model.Xdeployment.subsite,
+        model.StreamMetadata.node == model.Xdeployment.node,
+        model.StreamMetadata.sensor == model.Xdeployment.sensor,
+        model.StreamMetadata.method.in_(['telemetered', 'streamed']),
+        model.Xdeployment.sassetid == model.Xasset.assetid,
+        or_(
+            model.Xdeployment.eventstoptime.is_(None),
+            model.Xdeployment.eventstoptime > now
+        )
+    ):
+        yield sm, now - sm.last, uid
+
+
 def get_deployments(session, subsite, node, sensor, lower_bound=None, upper_bound=None):
     """
     Query which returns all known deployments for the specified instrument
