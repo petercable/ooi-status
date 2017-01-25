@@ -25,6 +25,7 @@ class StatusMessage(object):
             'location': self.location,
             'eventStartTime': self.event_time,
             'notes': self.notes,
+            'dataSource': self.data_source,
         }
 
     def __repr__(self):
@@ -37,6 +38,10 @@ class StatusMessage(object):
     @property
     def event_type(self):
         return 'ASSET_STATUS'
+
+    @property
+    def data_source(self):
+        return 'AUTO: data monitor service'
 
     @property
     def event_name(self):
@@ -52,7 +57,11 @@ class StatusMessage(object):
 
     @property
     def reason(self):
-        return 'reason'
+        if self.stream_status == 'operational':
+            return 'data interval within range (%s)' % self.interval
+        if self.stream_status in ['degraded', 'failed']:
+            return 'data interval threshold exceeded (%s > %s)' % (self.elapsed, self.interval)
+        return ''
 
     @property
     def location(self):
@@ -68,4 +77,4 @@ class StatusMessage(object):
 
     @property
     def notes(self):
-        return 'notes'
+        return 'changed from %s to %s' % (self.previous_status, self.stream_status)

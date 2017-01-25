@@ -315,3 +315,30 @@ def get_deployments(session, subsite, node, sensor, lower_bound=None, upper_boun
         filters.append(model.Xdeployment.eventstarttime < upper_bound)
 
     return session.query(model.Xdeployment).filter(*filters)
+
+
+def get_current_deployment(session, subsite, node, sensor):
+    """
+    Query which returns all known deployments for the specified instrument
+    :param session: sqlalchemy session object
+    :param subsite: subsite portion of reference designator (e.g. RS03AXPS)
+    :param node: node portion of reference designator (e.g. SF01A)
+    :param sensor: sensor portion of reference designator (e.g. 01-CTDPFA101)
+    :param lower_bound: datetime object representing the lower time bound of this query
+    :param upper_bound: datetime object representing the upper time bound of this query
+    :return: sqlalchemy query object representing this query
+    """
+    filters = [
+        model.Xdeployment.subsite == subsite,
+        model.Xdeployment.node == node,
+        model.Xdeployment.sensor == sensor
+    ]
+
+    return session.query(model.Xdeployment).filter(*filters).order_by(model.Xdeployment.deploymentnumber.desc()).first()
+
+
+def get_uid_from_refdes(session, refdes):
+    subsite, node, sensor = refdes.split('-', 2)
+    d = get_current_deployment(session, subsite, node, sensor)
+    return d.xinstrument.asset.uid
+

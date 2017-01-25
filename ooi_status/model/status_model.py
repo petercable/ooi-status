@@ -114,7 +114,7 @@ class DeployedStream(MonitorBase):
             return 'failed', datetime.timedelta(seconds=self.fail_interval)
         if elapsed_seconds > self.warn_interval:
             return 'degraded', datetime.timedelta(seconds=self.warn_interval),
-        return 'operational', None
+        return 'operational', datetime.timedelta(seconds=self.warn_interval)
 
     @property
     def expected_rate(self):

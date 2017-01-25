@@ -17,6 +17,7 @@ from sqlalchemy.sql.elements import and_
 
 from ooi_status.amqp_client import AmqpStatsClient
 from ooi_status.emailnotifier import EmailNotifier
+from ooi_status.event_notifier import EventNotifier
 from ooi_status.metadata_queries import get_active_streams
 from ooi_status.status_message import StatusMessage
 from .get_logger import get_logger
@@ -177,6 +178,11 @@ class BaseStatusMonitor(object):
         root_url = self.config.get('URL_ROOT')
         return EmailNotifier(smtp_host, from_addr, root_url, smtp_user, smtp_passwd)
 
+    def get_status_notifier(self):
+        root_url = self.config.get('NOTIFY_URL_ROOT')
+        event_port = self.config.get('NOTIFY_URL_PORT')
+        return EventNotifier(self.session, root_url, event_port)
+
 
 class PostgresStatusMonitor(BaseStatusMonitor):
     def __init__(self, engine, metadata_engine):
@@ -189,7 +195,21 @@ class PostgresStatusMonitor(BaseStatusMonitor):
         active = get_active_streams(self.metadata_session)
         changed = self._check_status(active)
         rolled = self._add_rollup_status(changed)
-        log.info(list(rolled))
+        notifier = self.get_status_notifier()
+
+        for message in rolled:
+            response = call_with_retry(notifier.post_event, message.uid, message.as_dict())
+            if response is not None:
+                log.info('post returned: (%d) %s', response.status_code, response.json())
+
+
+def call_with_retry(func, *args, **kwargs):
+    max_retries = kwargs.pop('max_retries', 3)
+    for attempt in range(1, max_retries+1):
+        try:
+            return func(*args, **kwargs)
+        except StandardError as e:
+            log.error('failed to execute: %s - retrying (%d of %d)', e, attempt, max_retries)
 
 
 @click.command()
