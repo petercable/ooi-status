@@ -3,6 +3,7 @@ Track the CI particles being ingested into cassandra and store information into 
 
 @author Dan Mergens
 """
+import datetime
 from sqlalchemy import Column, Integer, String, Float, ForeignKey, DateTime, UniqueConstraint
 from sqlalchemy.orm import relationship
 from .base import MonitorBase
@@ -105,14 +106,15 @@ class DeployedStream(MonitorBase):
         return '{0} {1} {2} {3}'.format(self.reference_designator, self.expected_stream,
                                         self.collected, self.particle_count)
 
-    def get_status(self, elapsed_seconds):
+    def get_status(self, elapsed):
+        elapsed_seconds = elapsed.total_seconds()
         if self.untracked:
-            return 'UNTRACKED'
+            return None, None
         if elapsed_seconds > self.fail_interval:
-            return 'FAIL %s' % self.fail_interval
+            return 'failed', datetime.timedelta(seconds=self.fail_interval)
         if elapsed_seconds > self.warn_interval:
-            return 'WARN %s' % self.warn_interval
-        return 'PASS'
+            return 'degraded', datetime.timedelta(seconds=self.warn_interval),
+        return 'operational', None
 
     @property
     def expected_rate(self):

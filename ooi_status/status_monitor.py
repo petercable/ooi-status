@@ -18,11 +18,13 @@ from sqlalchemy.sql.elements import and_
 from ooi_status.amqp_client import AmqpStatsClient
 from ooi_status.emailnotifier import EmailNotifier
 from ooi_status.metadata_queries import get_active_streams
+from ooi_status.status_message import StatusMessage
 from .get_logger import get_logger
-from .model.status_model import (DeployedStream, ExpectedStream, ReferenceDesignator, NotifyAddress, create_database)
-from .queries import (resample_stream_count, get_status_for_notification, resample_port_count,
+from .model.status_model import (DeployedStream, ExpectedStream, ReferenceDesignator, NotifyAddress, create_database,
+                                 StreamCondition)
+from .queries import (resample_stream_count, resample_port_count,
                       create_daily_digest_plots, create_daily_digest_html, get_unique_sites,
-                      get_stream_rates_dataframe, get_port_rates_dataframe, check_should_notify)
+                      get_stream_rates_dataframe, get_port_rates_dataframe, get_rollup_status)
 from .stop_watch import stopwatch
 
 log = get_logger(__name__, logging.INFO)
@@ -82,21 +84,47 @@ class BaseStatusMonitor(object):
     @stopwatch()
     def _check_status(self, rows):
         now = datetime.datetime.utcnow()
+
         with self.session.begin():
             for stream_metadata, elapsed, uid in rows:
                 deployed = self._get_or_create_stream(stream_metadata.refdes, stream_metadata.stream,
                                                       stream_metadata.method, stream_metadata.count,
                                                       stream_metadata.last, now)
 
-                elapsed_secs = elapsed.total_seconds()
+                condition = deployed.stream_condition
+                status, interval = deployed.get_status(elapsed)
 
-                log.info('processing %s %s %s %s %s %s',
-                         stream_metadata.refdes,
-                         stream_metadata.method,
-                         stream_metadata.stream,
-                         elapsed,
-                         uid,
-                         deployed.get_status(elapsed_secs))
+                if status is None:
+                    continue
+
+                if condition is None:
+                    now = datetime.datetime.utcnow()
+                    previous_status = 'not tracked'
+                    condition = StreamCondition(deployed_stream=deployed, last_status=status,
+                                                last_status_time=now)
+                    self.session.add(condition)
+                else:
+                    previous_status = condition.last_status
+                    condition.last_status = status
+                    condition.last_status_time = now
+
+                if previous_status != status:
+                    yield StatusMessage(stream_metadata.refdes,
+                                        stream_metadata.stream,
+                                        uid,
+                                        elapsed,
+                                        previous_status,
+                                        status,
+                                        interval)
+
+    def _add_rollup_status(self, status_generator):
+        status_dict = {}
+        for each in status_generator:
+            rollup_status = status_dict.get(each.refdes)
+            if rollup_status is None:
+                status_dict[each.refdes] = rollup_status = get_rollup_status(self.session, each.refdes)
+            each.instrument_status = rollup_status
+            yield each
 
     def resample_count_data_hourly(self):
         window_start = self.config.get('RESAMPLE_WINDOW_START_HOURS')
@@ -158,7 +186,10 @@ class PostgresStatusMonitor(BaseStatusMonitor):
         self.metadata_session = self.metadata_session_factory()
 
     def check_all(self):
-        self._check_status(get_active_streams(self.metadata_session))
+        active = get_active_streams(self.metadata_session)
+        changed = self._check_status(active)
+        rolled = self._add_rollup_status(changed)
+        log.info(list(rolled))
 
 
 @click.command()

@@ -607,3 +607,17 @@ def create_weekly_digest_html(session, day=None, root_url='',
         end = start + timedelta(days=7)
 
     return create_digest_html(session, start, end, image_dir, root_url, image_url, site)
+
+
+def get_rollup_status(session, refdes):
+    query = session.query(StreamCondition.last_status).join(DeployedStream, ReferenceDesignator)
+    query = query.filter(ReferenceDesignator.name == refdes)
+
+    statuses = set((status[0] for status in query))
+    if 'failed' in statuses:
+        return 'failed'
+    elif 'degraded' in statuses:
+        return 'degraded'
+    elif 'operational' in statuses:
+        return 'operational'
+    return 'not tracked'
