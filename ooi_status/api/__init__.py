@@ -9,8 +9,8 @@ from ooi_status.model import MonitorBase, MetadataBase
 
 class StatusJsonEncoder(JSONEncoder):
     def default(self, o):
-        if hasattr(o, 'asdict'):
-            return o.asdict()
+        if hasattr(o, 'as_dict'):
+            return o.as_dict()
         return JSONEncoder.default(self, o)
 
 
@@ -32,14 +32,9 @@ if 'OOISTATUS_SETTINGS' in os.environ:
     app.config.from_envvar('OOISTATUS_SETTINGS')
 app.json_encoder = StatusJsonEncoder
 
-user = app.config['USER']
-password = app.config['PASSWORD']
-posthost = app.config['POSTHOST']
 
-app.engine = create_engine('postgresql+psycopg2://{user}:{password}@{posthost}'.format(user=user,
-                                                                                       password=password,
-                                                                                       posthost=posthost))
-app.metadata_engine = create_engine('postgresql+psycopg2://awips@localhost/metadata', echo=True)
+app.engine = create_engine(app.config['MONITOR_URL'])
+app.metadata_engine = create_engine(app.config['METADATA_URL'])
 
 app.sessionmaker = sessionmaker(bind=app.engine)
 app.session = scoped_session(app.sessionmaker)
@@ -51,5 +46,6 @@ MonitorBase.query = app.session.query_property()
 
 if using_gevent:
     app.engine.pool._use_threadlocal = True
+
 
 import ooi_status.api.views

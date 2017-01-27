@@ -10,6 +10,8 @@ import logging
 from sqlalchemy import Column, Integer, String, Float, ForeignKey, DateTime, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSON
 from sqlalchemy.orm import relationship
+from werkzeug.exceptions import abort
+import six.moves.http_client as http_client
 
 from ooi_status.get_logger import get_logger
 from ooi_status.status_message import StatusEnum
@@ -64,9 +66,21 @@ class ExpectedStream(MonitorBase):
             session.flush()
         return expected
 
-    def asdict(self):
+    def as_dict(self):
         fields = ['id', 'name', 'method', 'expected_rate', 'warn_interval', 'fail_interval']
         return {field: getattr(self, field) for field in fields}
+
+    def patch(self, patch):
+        # if an ID is passed, verify it matches the query id
+        if 'id' in patch:
+            if self.id != patch['id']:
+                abort(http_client.BAD_REQUEST)
+        if 'expected_rate' in patch:
+            self.expected_rate = patch['expected_rate']
+        if 'warn_interval' in patch:
+            self.warn_interval = patch['warn_interval']
+        if 'fail_interval' in patch:
+            self.fail_interval = patch['fail_interval']
 
     def __repr__(self):
         return '{0} {1} {2} Hz {3}/{4}'.format(self.name, self.method, self.expected_rate,
@@ -102,7 +116,7 @@ class DeployedStream(MonitorBase):
             session.flush()
         return deployed
 
-    def asdict(self):
+    def as_dict(self):
         return {
             'id': self.id,
             'reference_designator': self.reference_designator.name,
@@ -165,6 +179,17 @@ class DeployedStream(MonitorBase):
         self._warn_interval = None
         self._fail_interval = None
 
+    def patch(self, patch):
+        if 'id' in patch:
+            if self.id != patch['id']:
+                abort(http_client.BAD_REQUEST)
+        if 'expected_rate' in patch:
+            self._expected_rate = patch['expected_rate']
+        if 'warn_interval' in patch:
+            self._warn_interval = patch['warn_interval']
+        if 'fail_interval' in patch:
+            self._fail_interval = patch['fail_interval']
+
 
 class StreamCondition(MonitorBase):
     __tablename__ = 'stream_condition'
@@ -178,24 +203,12 @@ class StreamCondition(MonitorBase):
 
     deployed_stream = relationship('DeployedStream', back_populates='stream_condition')
 
-
-class StreamCount(MonitorBase):
-    __tablename__ = 'stream_count'
-    id = Column(Integer, primary_key=True)
-    stream_id = Column(Integer, ForeignKey('deployed_stream.id'), nullable=False)
-    collected_time = Column(DateTime, nullable=False)
-    particle_count = Column(Integer, default=0)
-    seconds = Column(Float, default=0)
-    stream = relationship(DeployedStream, backref='stream_counts')
-
-    def __repr__(self):
-        return 'StreamCount(stream_id=%d, count=%d, seconds=%f, rate=%f, collected=%s)' % (
-            self.stream_id,
-            self.particle_count,
-            self.seconds,
-            self.particle_count / self.seconds,
-            self.collected_time
-        )
+    def as_dict(self):
+        return {
+            'stream': self.deployed_stream,
+            'last_status': self.last_status,
+            'last_status_time': self.last_status_time,
+        }
 
 
 class PortCount(MonitorBase):
@@ -206,19 +219,6 @@ class PortCount(MonitorBase):
     byte_count = Column(Integer, default=0)
     seconds = Column(Float, default=0)
     reference_designator = relationship(ReferenceDesignator, backref='port_counts')
-
-
-class NotifyAddress(MonitorBase):
-    __tablename__ = 'notify_address'
-    __table_args__ = (
-        UniqueConstraint('email_addr', 'email_type'),
-    )
-    id = Column(Integer, primary_key=True)
-    email_addr = Column(String, nullable=False)
-    email_type = Column(String, nullable=False)
-
-    def asdict(self):
-        return {'addr': self.email_addr, 'type': self.email_type}
 
 
 class PendingUpdate(MonitorBase):
