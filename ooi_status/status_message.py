@@ -1,7 +1,20 @@
 import time
 
 
+class StatusEnum:
+    """
+    See com.raytheon.uf.common.ooi.dataplugin.xasset.common.StatusLevel
+    """
+    OPERATIONAL = 'operational'
+    DEGRADED = 'degraded'
+    FAILED = 'failed'
+    NOT_TRACKED = 'notTracked'
+
+
 class StatusMessage(object):
+    """
+    See com.raytheon.uf.common.ooi.dataplugin.xasset.events.AssetStatusEvent
+    """
     def __init__(self, refdes, stream, uid, elapsed, previous_status, stream_status, interval, instrument_status=None):
         self.refdes = refdes
         self.stream = stream
@@ -57,9 +70,9 @@ class StatusMessage(object):
 
     @property
     def reason(self):
-        if self.stream_status == 'operational':
+        if self.stream_status == StatusEnum.OPERATIONAL:
             return 'data interval within range (%s)' % self.interval
-        if self.stream_status in ['degraded', 'failed']:
+        if self.stream_status in [StatusEnum.DEGRADED, StatusEnum.FAILED]:
             return 'data interval threshold exceeded (%s > %s)' % (self.elapsed, self.interval)
         return ''
 
