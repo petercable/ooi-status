@@ -4,8 +4,11 @@ from sqlalchemy import engine_from_config, pool
 from logging.config import fileConfig
 
 import sys
-sys.path.append('.')
-from ooi_status.model import MonitorBase
+import os
+here = os.path.dirname(__file__)
+base = os.path.dirname(here)
+sys.path.append(base)
+import ooi_status.model
 
 
 # this is the Alembic Config object, which provides
@@ -20,7 +23,7 @@ fileConfig(config.config_file_name)
 # for 'autogenerate' support
 # from myapp import mymodel
 # target_metadata = mymodel.Base.metadata
-target_metadata = MonitorBase.metadata
+target_metadata = ooi_status.model.MonitorBase.metadata
 
 # other values from the config, defined by the needs of env.py,
 # can be acquired:

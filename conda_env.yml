@@ -1,0 +1,43 @@
+name: status
+
+channels:
+- defaults
+- conda-forge
+
+dependencies:
+- click=6.7=py27_0
+- conda-forge::apscheduler=3.3.1=py27_0
+- conda-forge::geoalchemy2=0.3.0=py27_1
+- conda-forge::tzlocal=1.3=py27_0
+- flask=0.12=py27_0
+- funcsigs=1.0.2=py27_0
+- futures=3.0.5=py27_0
+- gevent=1.2.1=py27_0
+- greenlet=0.4.11=py27_0
+- gunicorn=19.1.0=py27_0
+- itsdangerous=0.24=py27_0
+- jinja2=2.9.4=py27_0
+- libpq=9.5.4=0
+- markupsafe=0.23=py27_2
+- mkl=2017.0.1=0
+- numpy=1.11.3=py27_0
+- openssl=1.0.2k=0
+- pandas=0.19.2=np111py27_1
+- pastedeploy=1.5.2=py27_1
+- pip=9.0.1=py27_1
+- psycopg2=2.6.2=py27_0
+- python=2.7.13=0
+- python-dateutil=2.6.0=py27_0
+- pytz=2016.10=py27_0
+- readline=6.2=2
+- requests=2.12.4=py27_0
+- setuptools=27.2.0=py27_0
+- six=1.10.0=py27_0
+- sqlalchemy=1.1.5=py27_0
+- sqlite=3.13.0=0
+- tk=8.5.18=0
+- werkzeug=0.11.15=py27_0
+- wheel=0.29.0=py27_0
+- zlib=1.2.8=3
+- pip:
+  - psycogreen==1.0

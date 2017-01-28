@@ -25,7 +25,6 @@ def get_status_query(session, filter_refdes=None, filter_method=None, filter_sta
         filter_constraints.append(StreamCondition.last_status.like('%%%s%%' % filter_status))
 
     query = query.filter(*filter_constraints)
-    log.info('query: %s %s', query, filter_constraints)
     return query
 
 

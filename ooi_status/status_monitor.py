@@ -32,16 +32,17 @@ MAX_STATUS_POST_FAILURES = 5
 
 
 class StatusMonitor(object):
-    def __init__(self, engine, metadata_engine):
-        self.engine = engine
-        self.session_factory = sessionmaker(bind=engine, autocommit=True)
+    def __init__(self, config):
+        self.config = config
+
+        self.engine = create_engine(config['MONITOR_URL'])
+        self.metadata_engine = create_engine(config['METADATA_URL'])
+
+        self.session_factory = sessionmaker(bind=self.engine, autocommit=True)
         self.session = self.session_factory()
 
-        self.metadata_engine = metadata_engine
-        self.metadata_session_factory = sessionmaker(bind=metadata_engine, autocommit=True)
+        self.metadata_session_factory = sessionmaker(bind=self.metadata_engine, autocommit=True)
         self.metadata_session = self.metadata_session_factory()
-
-        self.config = Config(here)
 
     def _get_or_create_refdes(self, reference_designator):
         return ReferenceDesignator.get_or_create(self.session, reference_designator)
@@ -57,6 +58,7 @@ class StatusMonitor(object):
     @stopwatch()
     def read_expected_csv(self, filename):
         """ Populate expected stream definitions from definition in CSV-formatted file"""
+        log.info('Populating the expected streams table')
         df = pd.read_csv(filename)
         fields = ['stream', 'method', 'expected rate (Hz)', 'timeout']
         with self.session.begin():
@@ -193,36 +195,31 @@ class StatusMonitor(object):
 
 
 @click.command()
-def main():
-    engine = create_engine('postgresql+psycopg2://monitor@/monitor')
-    create_database(engine)
-
-    metadata_engine = create_engine('postgresql+psycopg2://awips@/metadata')
-    monitor = StatusMonitor(engine, metadata_engine)
-
-    monitor.config.from_object('ooi_status.default_settings')
+@click.option('--expected', type=click.Path(exists=True, dir_okay=False),
+              help='CSV file with expected rates and timeouts')
+def main(expected):
+    config = Config(here)
+    config.from_object('ooi_status.default_settings')
     if 'OOISTATUS_SETTINGS' in os.environ:
-        monitor.config.from_envvar('OOISTATUS_SETTINGS')
+        config.from_envvar('OOISTATUS_SETTINGS')
 
-    for key in monitor.config:
-        log.info('OOI_STATUS CONFIG: %r: %r', key, monitor.config[key])
+    for key in config:
+        log.info('OOI_STATUS CONFIG: %r: %r', key, config[key])
 
-    # Disabled for now
-    # amqp_url = monitor.config.get('AMQP_URL')
-    # amqp_queue = monitor.config.get('AMQP_QUEUE')
-    # if amqp_url and amqp_queue:
-    #     # start the asynchronous AMQP listener
-    #     amqp_client = AmqpStatsClient(amqp_url, amqp_queue, engine)
-    #     amqp_client.start_thread()
+    monitor = StatusMonitor(config)
 
-    scheduler = BlockingScheduler()
-    log.info('adding jobs')
+    if expected:
+        monitor.read_expected_csv(expected)
 
-    # notify on change every minute
-    scheduler.add_job(monitor.check_all, 'cron', second=0)
-    scheduler.add_job(monitor.notify_all, 'cron', second=10)
-    log.info('starting jobs')
-    scheduler.start()
+    else:
+        scheduler = BlockingScheduler()
+        log.info('adding jobs')
+
+        # notify on change every minute
+        scheduler.add_job(monitor.check_all, 'cron', second=0)
+        scheduler.add_job(monitor.notify_all, 'cron', second=10)
+        log.info('starting jobs')
+        scheduler.start()
 
 
 if __name__ == '__main__':
