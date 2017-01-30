@@ -121,7 +121,7 @@ def get_instrument(refdes_id):
     return jsonify(get_status_by_refdes_id(app.session, refdes_id))
 
 
-@app.route('/stream/<int:deployed_id>/disable')
+@app.route('/stream/<int:deployed_id>/disable', method=['PUT'])
 def disable_by_id(deployed_id):
     deployed = app.session.query(DeployedStream).get(deployed_id)
     if deployed:
@@ -131,7 +131,7 @@ def disable_by_id(deployed_id):
     return jsonify(get_status_by_stream_id(app.session, deployed_id))
 
 
-@app.route('/stream/<int:deployed_id>/enable')
+@app.route('/stream/<int:deployed_id>/enable', methods=['PUT'])
 def enable_by_id(deployed_id):
     deployed = app.session.query(DeployedStream).get(deployed_id)
     if deployed:
@@ -141,7 +141,7 @@ def enable_by_id(deployed_id):
     return jsonify(get_status_by_stream_id(app.session, deployed_id))
 
 
-@app.route('/instrument/<refdes>/disable')
+@app.route('/instrument/<refdes>/disable', methods=['PUT'])
 def disable_by_refdes(refdes):
     deployed = app.session.query(DeployedStream).filter(DeployedStream.reference_designator == refdes)
     for each in deployed:
@@ -151,7 +151,7 @@ def disable_by_refdes(refdes):
     return jsonify(get_status_by_instrument(app.session, filter_refdes=refdes))
 
 
-@app.route('/instrument/<refdes>/enable')
+@app.route('/instrument/<refdes>/enable', methods=['PUT'])
 def enable_by_refdes(refdes):
     deployed = app.session.query(DeployedStream).filter(DeployedStream.reference_designator == refdes)
     for each in deployed:
