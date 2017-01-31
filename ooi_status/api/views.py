@@ -121,7 +121,7 @@ def get_instrument(refdes_id):
     return jsonify(get_status_by_refdes_id(app.session, refdes_id))
 
 
-@app.route('/stream/<int:deployed_id>/disable', method=['PUT'])
+@app.route('/stream/<int:deployed_id>/disable', methods=['PUT'])
 def disable_by_id(deployed_id):
     deployed = app.session.query(DeployedStream).get(deployed_id)
     if deployed:
