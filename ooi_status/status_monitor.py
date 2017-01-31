@@ -20,7 +20,7 @@ from ooi_status.event_notifier import EventNotifier
 from ooi_status.metadata_queries import get_active_streams
 from ooi_status.status_message import StatusMessage, StatusEnum
 from .get_logger import get_logger
-from .model.status_model import (DeployedStream, ExpectedStream, ReferenceDesignator, create_database,
+from .model.status_model import (DeployedStream, ExpectedStream, ReferenceDesignator,
                                  StreamCondition, PendingUpdate)
 from .queries import (resample_port_count, get_port_rates_dataframe, get_rollup_status)
 from .stop_watch import stopwatch
@@ -60,16 +60,16 @@ class StatusMonitor(object):
         """ Populate expected stream definitions from definition in CSV-formatted file"""
         log.info('Populating the expected streams table')
         df = pd.read_csv(filename)
-        fields = ['stream', 'method', 'expected rate (Hz)', 'timeout']
+        fields = ['name', 'method', 'expected_rate', 'warn_interval', 'fail_interval']
         with self.session.begin():
-            for stream, method, rate, timeout in df[fields].itertuples(index=False):
+            for stream, method, rate, warn_interval, fail_interval in df[fields].itertuples(index=False):
                 es = self.session.query(ExpectedStream).filter(and_(ExpectedStream.name == stream,
                                                                     ExpectedStream.method == method)).first()
                 if es is None:
                     es = ExpectedStream(name=stream, method=method)
                 es.expected_rate = rate
-                es.warn_interval = timeout * 2
-                es.fail_interval = timeout * 10
+                es.warn_interval = warn_interval
+                es.fail_interval = fail_interval
                 self.session.add(es)
 
     @stopwatch()
