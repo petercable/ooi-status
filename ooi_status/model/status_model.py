@@ -8,6 +8,7 @@ import datetime
 import logging
 
 from sqlalchemy import Column, Integer, String, Float, ForeignKey, DateTime, UniqueConstraint
+from sqlalchemy import func
 from sqlalchemy.dialects.postgresql import JSON
 from sqlalchemy.orm import relationship
 from werkzeug.exceptions import abort
@@ -95,23 +96,21 @@ class DeployedStream(MonitorBase):
     id = Column(Integer, primary_key=True)
     reference_designator_id = Column(Integer, ForeignKey('reference_designator.id'), nullable=False)
     expected_stream_id = Column(Integer, ForeignKey('expected_stream.id'), nullable=False)
-    particle_count = Column(Integer, nullable=False)
-    last_seen = Column(DateTime, nullable=False)
-    collected = Column(DateTime, nullable=False)
     _expected_rate = Column('expected_rate', Float)
     _warn_interval = Column('warn_interval', Integer)
     _fail_interval = Column('fail_interval', Integer)
+    status = Column(String, nullable=False, default=StatusEnum.NOT_TRACKED)
+    status_time = Column(DateTime, nullable=False, default=func.now())
+
     reference_designator = relationship(ReferenceDesignator, backref='deployed_streams', lazy='joined')
     expected_stream = relationship(ExpectedStream, backref='deployed_streams', lazy='joined')
-    stream_condition = relationship('StreamCondition', uselist=False, back_populates="deployed_stream")
 
     @staticmethod
-    def get_or_create(session, refdes_obj, expected_obj, count, timestamp, coll_time):
+    def get_or_create(session, refdes_obj, expected_obj):
         deployed = session.query(DeployedStream).filter(DeployedStream.reference_designator == refdes_obj,
                                                         DeployedStream.expected_stream == expected_obj).first()
         if deployed is None:
-            deployed = DeployedStream(reference_designator=refdes_obj, expected_stream=expected_obj,
-                                      particle_count=count, last_seen=timestamp, collected=coll_time)
+            deployed = DeployedStream(reference_designator=refdes_obj, expected_stream=expected_obj)
             session.add(deployed)
             session.flush()
         return deployed
@@ -125,6 +124,8 @@ class DeployedStream(MonitorBase):
             'expected_rate': self._expected_rate,
             'warn_interval': self._warn_interval,
             'fail_interval': self._fail_interval,
+            'status': self.status,
+            'status_time': self.status_time
         }
 
     def __repr__(self):
@@ -189,26 +190,6 @@ class DeployedStream(MonitorBase):
             self._warn_interval = patch['warn_interval']
         if 'fail_interval' in patch:
             self._fail_interval = patch['fail_interval']
-
-
-class StreamCondition(MonitorBase):
-    __tablename__ = 'stream_condition'
-    __table_args__ = (
-        UniqueConstraint('stream_id'),
-    )
-    id = Column(Integer, primary_key=True)
-    stream_id = Column(Integer, ForeignKey('deployed_stream.id'), nullable=False)
-    last_status_time = Column(DateTime, nullable=False)
-    last_status = Column(String, nullable=False)
-
-    deployed_stream = relationship('DeployedStream', back_populates='stream_condition')
-
-    def as_dict(self):
-        return {
-            'stream': self.deployed_stream,
-            'last_status': self.last_status,
-            'last_status_time': self.last_status_time,
-        }
 
 
 class PortCount(MonitorBase):

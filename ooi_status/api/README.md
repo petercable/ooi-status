@@ -102,7 +102,7 @@ specific values for a particular stream. For example:
 Query:
 
 ```
-http://uframe-4-test:9000/deployed/10
+http://uframe-4-test:9000/deployed/364
 ```
 
 Response:
@@ -112,16 +112,18 @@ Response:
 	"expected_rate": null,
 	"expected_stream": {
 		"expected_rate": 0,
-		"fail_interval": 600,
-		"id": 23,
+		"fail_interval": 1800,
+		"id": 11,
 		"method": "streamed",
-		"name": "ctdpf_optode_sample",
-		"warn_interval": 120
+		"name": "echo_sounding",
+		"warn_interval": 900
 	},
 	"fail_interval": null,
-	"id": 10,
-	"reference_designator": "RS01SLBS-LJ01A-12-CTDPFB101",
-	"reference_designator_id": 3,
+	"id": 364,
+	"reference_designator": "RS01SLBS-LJ01A-05-HPIESA101",
+	"reference_designator_id": 10,
+	"status": "failed",
+	"status_time": "Thu, 02 Feb 2017 00:21:00 GMT",
 	"warn_interval": null
 }
 ```
@@ -169,44 +171,40 @@ Response:
 {
 	"status": [
 		{
-			"last_status": "operational",
-			"last_status_time": "Tue, 31 Jan 2017 00:14:00 GMT",
-			"stream": {
-				"expected_rate": null,
-				"expected_stream": {
-					"expected_rate": 0,
-					"fail_interval": 600,
-					"id": 15,
-					"method": "streamed",
-					"name": "ctdbp_no_sample",
-					"warn_interval": 120
-				},
-				"fail_interval": null,
-				"id": 15,
-				"reference_designator": "CE04OSBP-LJ01C-06-CTDBPO108",
-				"reference_designator_id": 7,
-				"warn_interval": null
-			}
+			"expected_rate": null,
+			"expected_stream": {
+				"expected_rate": 0,
+				"fail_interval": 600,
+				"id": 23,
+				"method": "streamed",
+				"name": "ctdbp_no_sample",
+				"warn_interval": 120
+			},
+			"fail_interval": null,
+			"id": 376,
+			"reference_designator": "CE04OSBP-LJ01C-06-CTDBPO108",
+			"reference_designator_id": 16,
+			"status": "operational",
+			"status_time": "Thu, 02 Feb 2017 00:21:00 GMT",
+			"warn_interval": null
 		},
 		{
-			"last_status": "operational",
-			"last_status_time": "Tue, 31 Jan 2017 00:14:00 GMT",
-			"stream": {
-				"expected_rate": null,
-				"expected_stream": {
-					"expected_rate": 0,
-					"fail_interval": 600,
-					"id": 15,
-					"method": "streamed",
-					"name": "ctdbp_no_sample",
-					"warn_interval": 120
-				},
-				"fail_interval": null,
-				"id": 24,
-				"reference_designator": "CE02SHBP-LJ01D-06-CTDBPN106",
-				"reference_designator_id": 12,
-				"warn_interval": null
-			}
+			"expected_rate": null,
+			"expected_stream": {
+				"expected_rate": 0,
+				"fail_interval": 600,
+				"id": 23,
+				"method": "streamed",
+				"name": "ctdbp_no_sample",
+				"warn_interval": 120
+			},
+			"fail_interval": null,
+			"id": 387,
+			"reference_designator": "CE02SHBP-LJ01D-06-CTDBPN106",
+			"reference_designator_id": 21,
+			"status": "operational",
+			"status_time": "Thu, 02 Feb 2017 00:21:00 GMT",
+			"warn_interval": null
 		}
 	]
 }
@@ -250,24 +248,40 @@ Response:
 		"overall": "failed",
 		"status": [
 			{
-				"last_status": "failed",
-				"last_status_time": "Tue, 31 Jan 2017 00:26:00 GMT",
-				"stream": {
-					"expected_rate": null,
-					"expected_stream": {
-						"expected_rate": 0,
-						"fail_interval": 1120,
-						"id": 78,
-						"method": "streamed",
-						"name": "adcp_config",
-						"warn_interval": 224
-					},
-					"fail_interval": null,
-					"id": 113,
-					"reference_designator": "RS03AXPS-PC03A-06-VADCPA301",
-					"reference_designator_id": 34,
-					"warn_interval": null
-				}
+				"expected_rate": null,
+				"expected_stream": {
+					"expected_rate": 0,
+					"fail_interval": 600,
+					"id": 18,
+					"method": "streamed",
+					"name": "adcp_engineering",
+					"warn_interval": 300
+				},
+				"fail_interval": null,
+				"id": 444,
+				"reference_designator": "RS03AXPS-PC03A-06-VADCPA301",
+				"reference_designator_id": 45,
+				"status": "failed",
+				"status_time": "Thu, 02 Feb 2017 00:21:00 GMT",
+				"warn_interval": null
+			},
+			{
+				"expected_rate": null,
+				"expected_stream": {
+					"expected_rate": 0,
+					"fail_interval": 600,
+					"id": 38,
+					"method": "streamed",
+					"name": "vadcp_velocity_beam",
+					"warn_interval": 120
+				},
+				"fail_interval": null,
+				"id": 443,
+				"reference_designator": "RS03AXPS-PC03A-06-VADCPA301",
+				"reference_designator_id": 45,
+				"status": "failed",
+				"status_time": "Thu, 02 Feb 2017 00:21:00 GMT",
+				"warn_interval": null
 			}
 		]
 	},
@@ -275,24 +289,40 @@ Response:
 		"overall": "failed",
 		"status": [
 			{
-				"last_status": "failed",
-				"last_status_time": "Tue, 31 Jan 2017 00:26:00 GMT",
-				"stream": {
-					"expected_rate": null,
-					"expected_stream": {
-						"expected_rate": 0,
-						"fail_interval": 5536,
-						"id": 121,
-						"method": "streamed",
-						"name": "nutnr_a_dark_sample",
-						"warn_interval": 1107
-					},
-					"fail_interval": null,
-					"id": 105,
-					"reference_designator": "RS03AXPS-SF03A-4A-NUTNRA301",
-					"reference_designator_id": 59,
-					"warn_interval": null
-				}
+				"expected_rate": null,
+				"expected_stream": {
+					"expected_rate": 0,
+					"fail_interval": 14400,
+					"id": 46,
+					"method": "streamed",
+					"name": "nutnr_a_dark_sample",
+					"warn_interval": 7200
+				},
+				"fail_interval": null,
+				"id": 475,
+				"reference_designator": "RS03AXPS-SF03A-4A-NUTNRA301",
+				"reference_designator_id": 69,
+				"status": "failed",
+				"status_time": "Thu, 02 Feb 2017 00:21:00 GMT",
+				"warn_interval": null
+			},
+			{
+				"expected_rate": null,
+				"expected_stream": {
+					"expected_rate": 0,
+					"fail_interval": 14400,
+					"id": 47,
+					"method": "streamed",
+					"name": "nutnr_a_sample",
+					"warn_interval": 7200
+				},
+				"fail_interval": null,
+				"id": 474,
+				"reference_designator": "RS03AXPS-SF03A-4A-NUTNRA301",
+				"reference_designator_id": 69,
+				"status": "failed",
+				"status_time": "Thu, 02 Feb 2017 00:21:00 GMT",
+				"warn_interval": null
 			}
 		]
 	}
@@ -313,67 +343,61 @@ Response:
 
 ```json
 {
-	"overall": "failed",
+	"overall": "operational",
 	"status": [
 		{
-			"last_status": "operational",
-			"last_status_time": "Tue, 31 Jan 2017 00:23:00 GMT",
-			"stream": {
-				"expected_rate": null,
-				"expected_stream": {
-					"expected_rate": 0,
-					"fail_interval": 600,
-					"id": 44,
-					"method": "streamed",
-					"name": "adcp_engineering",
-					"warn_interval": 120
-				},
-				"fail_interval": null,
-				"id": 9,
-				"reference_designator": "RS01SLBS-LJ01A-10-ADCPTE101",
-				"reference_designator_id": 2,
-				"warn_interval": null
-			}
+			"expected_rate": null,
+			"expected_stream": {
+				"expected_rate": 0,
+				"fail_interval": 0,
+				"id": 19,
+				"method": "streamed",
+				"name": "adcp_config",
+				"warn_interval": 0
+			},
+			"fail_interval": null,
+			"id": 369,
+			"reference_designator": "RS01SLBS-LJ01A-10-ADCPTE101",
+			"reference_designator_id": 11,
+			"status": "notTracked",
+			"status_time": "Thu, 02 Feb 2017 00:21:00 GMT",
+			"warn_interval": null
 		},
 		{
-			"last_status": "operational",
-			"last_status_time": "Tue, 31 Jan 2017 00:23:00 GMT",
-			"stream": {
-				"expected_rate": null,
-				"expected_stream": {
-					"expected_rate": 0,
-					"fail_interval": 600,
-					"id": 26,
-					"method": "streamed",
-					"name": "adcp_velocity_beam",
-					"warn_interval": 120
-				},
-				"fail_interval": null,
-				"id": 8,
-				"reference_designator": "RS01SLBS-LJ01A-10-ADCPTE101",
-				"reference_designator_id": 2,
-				"warn_interval": null
-			}
+			"expected_rate": null,
+			"expected_stream": {
+				"expected_rate": 0,
+				"fail_interval": 600,
+				"id": 18,
+				"method": "streamed",
+				"name": "adcp_engineering",
+				"warn_interval": 300
+			},
+			"fail_interval": null,
+			"id": 367,
+			"reference_designator": "RS01SLBS-LJ01A-10-ADCPTE101",
+			"reference_designator_id": 11,
+			"status": "operational",
+			"status_time": "Thu, 02 Feb 2017 00:21:00 GMT",
+			"warn_interval": null
 		},
 		{
-			"last_status": "failed",
-			"last_status_time": "Tue, 31 Jan 2017 00:23:00 GMT",
-			"stream": {
-				"expected_rate": null,
-				"expected_stream": {
-					"expected_rate": 0,
-					"fail_interval": 1120,
-					"id": 78,
-					"method": "streamed",
-					"name": "adcp_config",
-					"warn_interval": 224
-				},
-				"fail_interval": null,
-				"id": 115,
-				"reference_designator": "RS01SLBS-LJ01A-10-ADCPTE101",
-				"reference_designator_id": 2,
-				"warn_interval": null
-			}
+			"expected_rate": null,
+			"expected_stream": {
+				"expected_rate": 0,
+				"fail_interval": 600,
+				"id": 17,
+				"method": "streamed",
+				"name": "adcp_velocity_beam",
+				"warn_interval": 120
+			},
+			"fail_interval": null,
+			"id": 368,
+			"reference_designator": "RS01SLBS-LJ01A-10-ADCPTE101",
+			"reference_designator_id": 11,
+			"status": "operational",
+			"status_time": "Thu, 02 Feb 2017 00:21:00 GMT",
+			"warn_interval": null
 		}
 	]
 }

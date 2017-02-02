@@ -15,7 +15,7 @@ class StatusMessage(object):
     """
     See com.raytheon.uf.common.ooi.dataplugin.xasset.events.AssetStatusEvent
     """
-    def __init__(self, refdes, stream, uid, elapsed, previous_status, stream_status, interval, instrument_status=None):
+    def __init__(self, refdes, stream, uid, elapsed, previous_status, stream_status, interval):
         self.refdes = refdes
         self.stream = stream
         self.uid = uid
@@ -23,7 +23,8 @@ class StatusMessage(object):
         self.previous_status = previous_status
         self.stream_status = stream_status
         self.interval = interval
-        self.instrument_status = instrument_status
+        self.instrument_status = None
+        self.instrument_reason = None
         self.created_time = time.time() * 1000
 
     def as_dict(self):
@@ -70,6 +71,10 @@ class StatusMessage(object):
 
     @property
     def reason(self):
+        return self.instrument_reason
+
+    @property
+    def stream_reason(self):
         if self.stream_status == StatusEnum.OPERATIONAL:
             return 'data interval within range (%s)' % self.interval
         if self.stream_status in [StatusEnum.DEGRADED, StatusEnum.FAILED]:
@@ -90,4 +95,5 @@ class StatusMessage(object):
 
     @property
     def notes(self):
-        return 'changed from %s to %s' % (self.previous_status, self.stream_status)
+        stream_reason = self.stream_reason
+        return ('(%s -> %s) %s' % (self.previous_status, self.stream_status, stream_reason)).rstrip()

@@ -23,7 +23,7 @@ def setup(level=logging.WARN):
     return logger
 
 
-def get_logger(name, level=logging.WARN):
+def get_logger(name, level=logging.DEBUG):
     global root_logger
     if root_logger is None:
         root_logger = setup(level)

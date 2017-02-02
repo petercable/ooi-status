@@ -11,17 +11,18 @@ import click
 import pandas as pd
 import requests
 from apscheduler.schedulers.blocking import BlockingScheduler
+from cachetools import LRUCache, cached
 from flask import Config
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm.exc import ObjectDeletedError
 from sqlalchemy.sql.elements import and_
 
 from ooi_status.event_notifier import EventNotifier
 from ooi_status.metadata_queries import get_active_streams
 from ooi_status.status_message import StatusMessage, StatusEnum
 from .get_logger import get_logger
-from .model.status_model import (DeployedStream, ExpectedStream, ReferenceDesignator,
-                                 StreamCondition, PendingUpdate)
+from .model.status_model import (DeployedStream, ExpectedStream, ReferenceDesignator, PendingUpdate)
 from .queries import (resample_port_count, get_port_rates_dataframe, get_rollup_status)
 from .stop_watch import stopwatch
 
@@ -29,6 +30,7 @@ log = get_logger(__name__, logging.INFO)
 here = os.path.dirname(__file__)
 
 MAX_STATUS_POST_FAILURES = 5
+STREAM_CACHE = LRUCache(3000)
 
 
 class StatusMonitor(object):
@@ -44,16 +46,24 @@ class StatusMonitor(object):
         self.metadata_session_factory = sessionmaker(bind=self.metadata_engine, autocommit=True)
         self.metadata_session = self.metadata_session_factory()
 
-    def _get_or_create_refdes(self, reference_designator):
-        return ReferenceDesignator.get_or_create(self.session, reference_designator)
+    @cached(STREAM_CACHE)
+    def _get_or_create_stream(self, refdes, stream, method):
+        refdes_obj = ReferenceDesignator.get_or_create_refdes(self.session, refdes)
+        expected_obj = ExpectedStream.get_or_create_expected(self.session, stream, method)
+        return DeployedStream.get_or_create(self.session, refdes_obj, expected_obj)
 
-    def _get_or_create_expected(self, stream, method):
-        return ExpectedStream.get_or_create(self.session, stream, method)
-
-    def _get_or_create_stream(self, refdes, stream, method, count, timestamp, coll_time):
-        refdes_obj = self._get_or_create_refdes(refdes)
-        expected_obj = self._get_or_create_expected(stream, method)
-        return DeployedStream.get_or_create(self.session, refdes_obj, expected_obj, count, timestamp, coll_time)
+    def get_or_create_stream(self, refdes, stream, method):
+        """
+        Attempt to fetch this value from the cached method. If the cached value no longer exists,
+        delete from the cache and create a new object.
+        """
+        try:
+            ds = self._get_or_create_stream(refdes, stream, method)
+            s = ds.status
+        except ObjectDeletedError:
+            del STREAM_CACHE[(self, refdes, stream, method)]
+            ds = self._get_or_create_stream(refdes, stream, method)
+        return ds
 
     @stopwatch()
     def read_expected_csv(self, filename):
@@ -80,44 +90,39 @@ class StatusMonitor(object):
         with self.session.begin():
 
             for stream_metadata, elapsed, uid in rows:
-                deployed = self._get_or_create_stream(stream_metadata.refdes, stream_metadata.stream,
-                                                      stream_metadata.method, stream_metadata.count,
-                                                      stream_metadata.last, now)
+                deployed = self.get_or_create_stream(stream_metadata.refdes,
+                                                     stream_metadata.stream,
+                                                     stream_metadata.method)
 
-                condition = deployed.stream_condition
                 status, interval = deployed.get_status(elapsed)
-                log.debug('REFDES:%s STREAM:%s STATUS:%s', stream_metadata.refdes, stream_metadata.stream, status)
 
-                if condition is None:
-                    now = datetime.datetime.utcnow()
-                    previous_status = StatusEnum.NOT_TRACKED
-                    condition = StreamCondition(deployed_stream=deployed, last_status=status,
-                                                last_status_time=now)
-                    self.session.add(condition)
-                else:
-                    previous_status = condition.last_status
-                    condition.last_status = status
-                    condition.last_status_time = now
+                if deployed.status == status:
+                    continue
 
-                if previous_status != status:
-                    messages.append(StatusMessage(stream_metadata.refdes,
-                                                  stream_metadata.stream,
-                                                  uid,
-                                                  elapsed,
-                                                  previous_status,
-                                                  status,
-                                                  interval))
+                messages.append(StatusMessage(stream_metadata.refdes,
+                                              stream_metadata.stream,
+                                              uid,
+                                              elapsed,
+                                              deployed.status,
+                                              status,
+                                              interval))
+                deployed.status = status
+                deployed.status_time = now
+
         return messages
 
+    @stopwatch()
     def _add_rollup_status(self, in_messages):
         status_dict = {}
         out_messages = []
         with self.session.begin():
             for each in in_messages:
-                rollup_status = status_dict.get(each.refdes)
+                rollup_status, rollup_reason = status_dict.get(each.refdes, (None, None))
                 if rollup_status is None:
-                    status_dict[each.refdes] = rollup_status = get_rollup_status(self.session, each.refdes)
+                    rollup_status, rollup_reason = get_rollup_status(self.session, each.refdes)
+                    status_dict[each.refdes] = rollup_status, rollup_reason
                 each.instrument_status = rollup_status
+                each.instrument_reason = rollup_reason
                 out_messages.append(each)
         return out_messages
 
@@ -141,6 +146,7 @@ class StatusMonitor(object):
         event_port = self.config.get('NOTIFY_URL_PORT')
         return EventNotifier(self.session, root_url, event_port)
 
+    @stopwatch()
     def save_pending(self, messages):
         with self.session.begin():
             for message in messages:
@@ -155,9 +161,10 @@ class StatusMonitor(object):
 
     def notify_all(self):
         notifier = self.get_status_notifier()
+        session = self.session_factory()
 
-        with self.session.begin():
-            for pu in self.session.query(PendingUpdate).order_by(PendingUpdate.id):
+        with session.begin():
+            for pu in session.query(PendingUpdate).order_by(PendingUpdate.id):
                 message = pu.message
                 uid = message.get('assetUid')
                 delete = False
@@ -191,7 +198,7 @@ class StatusMonitor(object):
                         # we'll keep trying until we can connect to uframe
                         continue
                 if delete:
-                    self.session.delete(pu)
+                    session.delete(pu)
 
 
 @click.command()

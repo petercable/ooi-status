@@ -1,4 +1,5 @@
 import logging
+from collections import Counter
 from datetime import timedelta, datetime
 
 import pandas as pd
@@ -6,13 +7,13 @@ from sqlalchemy.sql.elements import and_
 
 from ooi_status.status_message import StatusEnum
 from .get_logger import get_logger
-from .model.status_model import (ExpectedStream, DeployedStream, StreamCondition, PortCount, ReferenceDesignator)
+from .model.status_model import (ExpectedStream, DeployedStream, PortCount, ReferenceDesignator)
 
 log = get_logger(__name__, logging.INFO)
 
 
 def get_status_query(session, filter_refdes=None, filter_method=None, filter_status=None, filter_stream=None):
-    query = session.query(StreamCondition).join(DeployedStream, ExpectedStream, ReferenceDesignator)
+    query = session.query(DeployedStream).join(ExpectedStream, ReferenceDesignator)
 
     filter_constraints = []
     if filter_refdes:
@@ -22,7 +23,7 @@ def get_status_query(session, filter_refdes=None, filter_method=None, filter_sta
     if filter_stream:
         filter_constraints.append(ExpectedStream.name.like('%%%s%%' % filter_stream))
     if filter_status:
-        filter_constraints.append(StreamCondition.last_status.like('%%%s%%' % filter_status))
+        filter_constraints.append(DeployedStream.status.like('%%%s%%' % filter_status))
 
     query = query.filter(*filter_constraints)
     return query
@@ -60,44 +61,42 @@ def get_status_by_instrument(session, filter_refdes=None, filter_method=None, fi
 
     # group by reference designator
     grouped = {}
-    for sc in query:
-        refdes = sc.deployed_stream.reference_designator.name
-        grouped.setdefault(refdes, []).append(sc)
+    for ds in query:
+        refdes = ds.reference_designator.name
+        grouped.setdefault(refdes, []).append(ds)
 
     out = {}
     # create a rollup status
     for refdes in grouped:
-        conditions = grouped[refdes]
-        overall = _rollup_statuses(set(c.last_status for c in conditions))
+        streams = grouped[refdes]
+        overall = _rollup_statuses(set(s.status for s in streams))
         out[refdes] = {
             'overall': overall,
-            'status': [c.as_dict() for c in conditions]
+            'status': streams
         }
 
     return out
 
 
 def get_status_by_refdes_id(session, refdes_id):
-    query = session.query(StreamCondition).join(DeployedStream,
-                                                ReferenceDesignator).filter(ReferenceDesignator.id == refdes_id)
-    conditions = list(query)
-    overall = _rollup_statuses(set(c.last_status for c in conditions))
+    query = session.query(DeployedStream).join(ReferenceDesignator).filter(ReferenceDesignator.id == refdes_id)
+    streams = list(query)
+    overall = _rollup_statuses(set(s.status for s in streams))
     return {
         'overall': overall,
-        'status': [c.as_dict() for c in conditions]}
+        'status': streams
+    }
 
 
 def get_status_by_stream(session, filter_refdes=None, filter_method=None, filter_stream=None, filter_status=None):
     return {
-        'status': [status.as_dict() for status in get_status_query(session,
-                                                                   filter_refdes=filter_refdes,
-                                                                   filter_method=filter_method,
-                                                                   filter_stream=filter_stream,
-                                                                   filter_status=filter_status)]}
+        'status': list(get_status_query(session, filter_refdes=filter_refdes, filter_method=filter_method,
+                                        filter_stream=filter_stream, filter_status=filter_status))
+    }
 
 
 def get_status_by_stream_id(session, deployed_id):
-    return session.query(StreamCondition).filter(StreamCondition.stream_id == deployed_id).first()
+    return session.query(DeployedStream).get(deployed_id).first()
 
 
 #### RATES ####
@@ -127,17 +126,24 @@ def _rollup_statuses(statuses):
 
 
 def _rollup_status_query(query):
-    statuses = set((status[0] for status in query))
-    return _rollup_statuses(statuses)
+    statuses = Counter((status[0] for status in query))
+    rollup_status = _rollup_statuses(statuses)
+    reasons = []
+    for key in [StatusEnum.OPERATIONAL, StatusEnum.DEGRADED, StatusEnum.FAILED, StatusEnum.NOT_TRACKED]:
+        if key in statuses:
+            reasons.append('%s: %d' % (key, statuses[key]))
+
+    rollup_reason = 'Stream statuses: ' + ', '.join(reasons)
+    return rollup_status, rollup_reason
 
 
 def get_rollup_status_by_id(session, refdes_id):
-    query = session.query(StreamCondition.last_status).join(DeployedStream, ReferenceDesignator)
+    query = session.query(DeployedStream.status).join(ReferenceDesignator)
     query = query.filter(ReferenceDesignator.id == refdes_id)
     return _rollup_status_query(query)
 
 
 def get_rollup_status(session, refdes):
-    query = session.query(StreamCondition.last_status).join(DeployedStream, ReferenceDesignator)
+    query = session.query(DeployedStream.status).join(ReferenceDesignator)
     query = query.filter(ReferenceDesignator.name == refdes)
     return _rollup_status_query(query)
