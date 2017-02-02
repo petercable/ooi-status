@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name='ooinet_status',
-    version='1.0.2',
+    version='1.0.3',
     url='https://github.com/oceanobservatories/ooi-status',
     long_description=__doc__,
     packages=find_packages(exclude=['test', 'alembic']),

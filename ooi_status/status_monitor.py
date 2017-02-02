@@ -48,8 +48,8 @@ class StatusMonitor(object):
 
     @cached(STREAM_CACHE)
     def _get_or_create_stream(self, refdes, stream, method):
-        refdes_obj = ReferenceDesignator.get_or_create_refdes(self.session, refdes)
-        expected_obj = ExpectedStream.get_or_create_expected(self.session, stream, method)
+        refdes_obj = ReferenceDesignator.get_or_create(self.session, refdes)
+        expected_obj = ExpectedStream.get_or_create(self.session, stream, method)
         return DeployedStream.get_or_create(self.session, refdes_obj, expected_obj)
 
     def get_or_create_stream(self, refdes, stream, method):
@@ -73,10 +73,7 @@ class StatusMonitor(object):
         fields = ['name', 'method', 'expected_rate', 'warn_interval', 'fail_interval']
         with self.session.begin():
             for stream, method, rate, warn_interval, fail_interval in df[fields].itertuples(index=False):
-                es = self.session.query(ExpectedStream).filter(and_(ExpectedStream.name == stream,
-                                                                    ExpectedStream.method == method)).first()
-                if es is None:
-                    es = ExpectedStream(name=stream, method=method)
+                es = ExpectedStream.get_or_create(self.session, stream, method)
                 es.expected_rate = rate
                 es.warn_interval = warn_interval
                 es.fail_interval = fail_interval
