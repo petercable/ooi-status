@@ -1,8 +1,8 @@
 name,method,expected_rate,warn_interval,fail_interval
 adcp_config,streamed,0,0,0
 adcp_config_5,streamed,0,0,0
-adcp_engineering,streamed,0,300,600
-adcp_engineering_5,streamed,0,600,1200
+adcp_engineering,streamed,0,1200,2400
+adcp_engineering_5,streamed,0,1200,2400
 adcp_velocity_beam,streamed,0,120,600
 antelope_metadata,streamed,0,120,600
 botpt_heat_sample,streamed,0,120,600
@@ -28,14 +28,14 @@ ctdpf_sbe43_sample,streamed,0,120,600
 ctdpf_sbe43_status,streamed,0,0,0
 d1000_sample,streamed,0,200,1000
 deep_profiler_dock_eng_data,streamed,0,0,0
-echo_sounding,streamed,0,900,1800
+echo_sounding,streamed,0,3600,7200
 flort_d_data_record,streamed,0,120,600
 flort_d_status,streamed,0,0,0
-horizontal_electric_field,streamed,0,400,800
-hpies_data_header,streamed,0,600,1200
+horizontal_electric_field,streamed,0,1600,3200
+hpies_data_header,streamed,0,1200,2400
 hpies_status,streamed,0,1200,6000
 massp_mcu_status,streamed,0,0,0
-motor_current,streamed,0,400,800
+motor_current,streamed,0,1600,3200
 nutnr_a_dark_sample,streamed,0,7200,14400
 nutnr_a_sample,streamed,0,7200,14400
 optaa_sample,streamed,0,120,600
@@ -72,7 +72,7 @@ shore_station_ups_line_eng_data,streamed,0,0,0
 shore_station_ups_status,streamed,0,0,0
 spkir_a_configuration_record,streamed,0,0,0
 spkir_data_record,streamed,0,120,600
-stm_timestamp,streamed,0,120,600
+stm_timestamp,streamed,0,1200,2400
 thsph_sample,streamed,0,120,600
 tmpsf_sample,streamed,0,120,600
 trhph_sample,streamed,0,120,600
@@ -85,4 +85,4 @@ vel3d_cd_data_header,streamed,0,0,0
 vel3d_cd_system_data,streamed,0,0,0
 vel3d_cd_velocity_data,streamed,0,120,600
 velpt_velocity_data,streamed,0,120,600
-zplsc_metadata,streamed,0,86400,172800
+zplsc_metadata,streamed,0,172800,300000

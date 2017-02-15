@@ -40,6 +40,7 @@ class StatusMessage(object):
             'eventStartTime': self.event_time,
             'notes': self.notes,
             'dataSource': self.data_source,
+            'method': self.method,
         }
 
     def __repr__(self):
@@ -97,3 +98,7 @@ class StatusMessage(object):
     def notes(self):
         stream_reason = self.stream_reason
         return ('(%s -> %s) %s' % (self.previous_status, self.stream_status, stream_reason)).rstrip()
+
+    @property
+    def method(self):
+        return 'automatic'
