@@ -10,3 +10,4 @@ psycogreen==1.0
 gunicorn==19.6.0
 gevent==1.2.1
 cachetools==2.0.0
+git+https://github.com/oceanobservatories/ooi-data@v0.0.1
