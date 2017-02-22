@@ -1,14 +1,17 @@
 import os
+import datetime
 from flask import Flask
 from flask.json import JSONEncoder
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, scoped_session
 
-from ooi_status.model import MonitorBase, MetadataBase
+from ooi_data.postgres.model import MonitorBase, MetadataBase
 
 
 class StatusJsonEncoder(JSONEncoder):
     def default(self, o):
+        if isinstance(o, datetime.date):
+            return str(o)
         if hasattr(o, 'as_dict'):
             return o.as_dict()
         return JSONEncoder.default(self, o)
