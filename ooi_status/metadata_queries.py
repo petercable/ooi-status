@@ -2,8 +2,7 @@ import datetime
 
 import pandas as pd
 from ooi_data.postgres import model
-from sqlalchemy import func
-from sqlalchemy import or_
+from sqlalchemy import func, not_, or_
 
 from .get_logger import get_logger
 
@@ -15,7 +14,7 @@ MISSING = 'Missing'
 PRESENT = 'Present'
 
 data_categories = {
-    NOT_EXPECTED: { 'color': '#ffffff'},
+    NOT_EXPECTED: {'color': '#ffffff'},
     MISSING: {'color': '#d9534d'},
     PRESENT: {'color': '#5cb85c'}
 }
@@ -228,6 +227,8 @@ def find_instrument_availability(session, refdes, method=None, stream=None, lowe
 
     if method:
         filters.append(model.StreamMetadatum.method == method)
+    else:
+        filters.append(not_(model.StreamMetadatum.method.like('bad%')))
     if stream:
         filters.append(model.StreamMetadatum.stream == stream)
 

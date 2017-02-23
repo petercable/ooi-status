@@ -11,6 +11,8 @@ from ooi_data.postgres.model import MonitorBase, MetadataBase
 class StatusJsonEncoder(JSONEncoder):
     def default(self, o):
         if isinstance(o, datetime.date):
+            if isinstance(o, datetime.datetime):
+                return str(o.replace(microsecond=0))
             return str(o)
         if hasattr(o, 'as_dict'):
             return o.as_dict()
