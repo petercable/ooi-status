@@ -4,10 +4,10 @@ adcp_config_5,streamed,0,0,0
 adcp_engineering,streamed,0,1200,2400
 adcp_engineering_5,streamed,0,1200,2400
 adcp_velocity_beam,streamed,0,120,600
-antelope_metadata,streamed,0,120,600
+antelope_metadata,streamed,0,86400,172800
 botpt_heat_sample,streamed,0,120,600
 botpt_iris_sample,streamed,0,120,600
-botpt_lily_leveling,streamed,0,120,600
+botpt_lily_leveling,streamed,0,0,0
 botpt_lily_sample,streamed,0,120,600
 botpt_nano_sample,streamed,0,120,600
 calibration_status,streamed,0,0,0
